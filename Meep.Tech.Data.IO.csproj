@@ -3,30 +3,14 @@
   <PropertyGroup>
     <TargetFrameworks>netstandard2.1;net5;net6</TargetFrameworks>
     <LangVersion>9</LangVersion>
+	  <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Meep.Tech.Data\Meep.Tech.Data.csproj" />
+	<ProjectReference Include="..\Meep.Tech.Data\Meep.Tech.Data.csproj" />
+	<PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Reference Include="Newtonsoft.Json">
-      <HintPath>..\..\..\..\apps\unity\Overworld\Library\PackageCache\com.unity.nuget.newtonsoft-json@2.0.0\Runtime\Newtonsoft.Json.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.dll&quot; &quot;..\..\..\..\apps\unity\Overworld\Assets\Packages\ECSBAM\IO\&quot; /y" />
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.pdb&quot; &quot;..\..\..\..\apps\unity\Overworld\Assets\Packages\ECSBAM\IO\&quot; /y" />
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.deps.json&quot; &quot;..\..\..\..\apps\unity\Overworld\Assets\Packages\ECSBAM\IO\&quot; /y" />
-
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.dll&quot; &quot;..\..\..\..\apps\unity\Overworld Launcher\Assets\Packages\ECSBAM\IO\&quot; /y" />
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.pdb&quot; &quot;..\..\..\..\apps\unity\Overworld Launcher\Assets\Packages\ECSBAM\IO\&quot; /y" />
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.deps.json&quot; &quot;..\..\..\..\apps\unity\Overworld Launcher\Assets\Packages\ECSBAM\IO\&quot; /y" />
-
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.dll&quot; &quot;..\..\..\..\apps\unity\Overworld Tests\Assets\Packages\ECSBAM\IO\&quot; /y" />
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.pdb&quot; &quot;..\..\..\..\apps\unity\Overworld Tests\Assets\Packages\ECSBAM\IO\&quot; /y" />
-    <Exec Command="xcopy &quot;bin\Debug\netstandard2.1\Meep.Tech.Data.IO.deps.json&quot; &quot;..\..\..\..\apps\unity\Overworld Tests\Assets\Packages\ECSBAM\IO\&quot; /y" />
-  </Target>
+	<Import Project="post-build-copy.csproj" Condition="Exists('post-build-copy.csproj')" />
 
 </Project>
