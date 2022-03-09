@@ -43,7 +43,8 @@ namespace Meep.Tech.Data.IO {
     JObject GenerateConfig();
 
     /// <summary>
-    /// Must be overriden to un-load a portable archetype..
+    /// Must be overriden to un-load a portable archetype from current memory.
+    /// TODO: a way to do this should be exposed as a protected member in the Archetype<,> class
     /// </summary>
     internal protected void Unload();
   }

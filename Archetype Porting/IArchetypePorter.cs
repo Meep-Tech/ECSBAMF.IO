@@ -1,4 +1,5 @@
 ﻿using Meep.Tech.Data;
+using Newtonsoft.Json.Linq;
 using System.Collections.Generic;
 
 namespace Meep.Tech.Data.IO {
@@ -33,7 +34,7 @@ namespace Meep.Tech.Data.IO {
     /// <summary>
     /// Import and build all archetypes from the provided loose files and folder names.
     /// </summary>
-    IEnumerable<Archetype> ImportAndBuildNewArchetypesFromLooseFilesAndFolders(string[] externalFileAndFolderLocations, Dictionary<string, object> options, out IEnumerable<string> processedFiles);
+    IEnumerable<Archetype> ImportAndBuildNewArchetypesFromLooseFilesAndFolders(string[] externalFileAndFolderLocations, Dictionary<string, object> options, out HashSet<string> processedFiles);
 
     /// <summary>
     /// Import and build all archetypes from the provided mods folder location using the expected mods folder structure.
@@ -46,20 +47,32 @@ namespace Meep.Tech.Data.IO {
     IEnumerable<Archetype> ImportAndPackageModsFromImportsFolder(Dictionary<string, object> options);
 
     /// <summary>
+    /// Construct all of the needed keys for an asset/archetype.
+    /// </summary>
+    /// <param name="primaryAssetFilename">The promary asset file being imported</param>
+    /// <param name="fromSingleArchetypeFolder">If this is from a single archetype folder (not loose assets)</param>
+    (string resourceName, string packageName, string resourceKey) ConstructArchetypeKeys(string primaryAssetFilename, Dictionary<string, object> options, JObject config);
+
+    /// <summary>
     /// Get the sub folder under the mod folder on the device used for this specfic archetype,
     /// also splits up the key into it's parts
     /// </summary>
-    string GetFolderForModItem(string resouceKey, out string resourceName, out string packageName);    
+    string GetArchetypeFolderAndDeconstructKey(string resouceKey, out string resourceName, out string packageName);
 
     /// <summary>
-    /// Get the sub folder unther the mod folder on the device used for this specfic archetype
+    /// Get an archetype folder from just the resource key.
     /// </summary>
-    string GetFolderForModItem(string resourceName, string packageName);
+    string GetArchetypeFolderFromKey(string resourceKey);
 
     /// <summary>
-    /// Get the sub folder under the mod folder on the device used for this specfic archetype
+    /// Get the folder for a given archetype
     /// </summary>
-    string GetFolderForArchetype(IPortableArchetype archetype);
+    string GetFolderFor(Archetype portableArchetype);
+
+    /// <summary>
+    /// Get the current default package name
+    /// </summary>
+    string GetDefaultPackageName();
 
     /// <summary>
     /// Serialize this archetype to a set of files in the mod folder.
@@ -67,17 +80,5 @@ namespace Meep.Tech.Data.IO {
     /// <param name="archetype">The archetype to serialize into a file or files</param>
     /// <returns>The newly serialized file's locations</returns>
     public string[] SerializeArchetypeToModFolder(Archetype archetype);
-
-    /// <summary>
-    /// Move an archetype from it's old name to a new folder with it's new name (within the same package)
-    /// WARNING This overwrites any existing archetypes with the same name. Use try if you don't want to do this.
-    /// </summary>
-    void ForceMoveRenamedArchetypeFolder(string oldName, IPortableArchetype archetype);
-
-    /// <summary>
-    /// Move an archetype from it's old name to a new folder with it's new name (within the same package)
-    /// This returns false if the file exists already, meaning there's already an archetype with the given key.
-    /// </summary>
-    bool TryToMoveRenamedArchetypeFolder(string oldName, IPortableArchetype archetype);
   }
 }

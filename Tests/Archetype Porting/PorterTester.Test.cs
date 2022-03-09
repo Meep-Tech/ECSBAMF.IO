@@ -1,4 +1,11 @@
-﻿using System;
+﻿using Meep.Tech.Collections.Generic;
+using Meep.Tech.Data.IO.Tests;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace Meep.Tech.Data.IO.Tests {
 
@@ -7,12 +14,26 @@ namespace Meep.Tech.Data.IO.Tests {
     public abstract class Test {
 
       /// <summary>
+      /// The unique name of this test.
+      /// </summary>
+      public string UniqueTestName {
+        get;
+        protected set;
+      }
+
+      /// <summary>
       /// Run this test on the given porter.
       /// </summary>
       public TestResult RunOn(PorterTester<TArchetype> testRunner) {
-        Initalize(testRunner);
-        var result = RunTest(testRunner);
-        DeInitialize(testRunner);
+        TestResult result;
+        try {
+          Initalize(testRunner);
+          result = RunTest(testRunner);
+          DeInitialize(testRunner);
+        }
+        catch (Exception ex) {
+          result = new TestResult(ex);
+        }
 
         return result;
       }
@@ -36,7 +57,7 @@ namespace Meep.Tech.Data.IO.Tests {
           Succeded = succeded;
           Exception = exception;
           Value = value;
-          Message = message ?? exception.Message ?? (succeded ? "Test Succeded!" : "Test Failed!");
+          Message = message ?? exception?.Message ?? (succeded ? "Test Succeded!" : "Test Failed!");
         }
 
         public TestResult(Exception exception) {
@@ -45,6 +66,9 @@ namespace Meep.Tech.Data.IO.Tests {
           Value = null;
           Message = $"Test Failed: {exception}";
         }
+
+        public override string ToString()
+          => $"[{(Succeded ? "Success" : "failure")}]: {Message}";
       }
     }
   }

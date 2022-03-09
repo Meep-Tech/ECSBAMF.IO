@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Reflection;
 
 namespace Meep.Tech.Data.IO {
 
@@ -11,70 +13,6 @@ namespace Meep.Tech.Data.IO {
   /// Base statics and accesability stuff for non generic ArchetypePorter access.
   /// </summary>
   public abstract class ArchetypePorter {
-
-    /// <summary>
-    /// The base mod folder name
-    /// </summary>
-    public const string ModFolderName
-      = "mods";
-
-    /// <summary>
-    /// The imports folder name
-    /// </summary>
-    public const string ImportFolderName
-      = "__imports";
-
-    /// <summary>
-    /// The finished imports folder name.
-    /// </summary>
-    public const string FinishedImportsFolderName
-      = "__processed_imports";
-
-    /// <summary>
-    /// Option parameter to override the object name
-    /// </summary>
-    public const string NameOverrideSetting
-      = "Name";
-
-    /// <summary>
-    /// Option parameter to override the object name
-    /// </summary>
-    public const string PagkageNameOverrideSetting
-      = "PackageName";
-
-    /// <summary>
-    /// Option parameter to Move the imported files to the finished imports folder.
-    /// Accepts a bool
-    /// </summary>
-    public const string MoveFinishedFilesToFinishedImportsFolderSetting
-      = "MoveImportedFilesToFinished";
-
-    /// <summary>
-    /// The name of the config json file.
-    /// </summary>
-    public const string DefaultConfigFileName = "_config.json";
-
-    /// <summary>
-    /// The root mod folder.
-    /// </summary>
-    public static readonly string RootModsFolder 
-      // TOOD: add setting for this root value.
-      = Path.Combine("ROOT", ModFolderName);
-  }
-
-  /// <summary>
-  /// used to im/export archetypes of a specific type from mods
-  /// </summary>
-  public abstract partial class ArchetypePorter<TArchetype> : ArchetypePorter, IArchetypePorter
-    where TArchetype : Meep.Tech.Data.Archetype, IPortableArchetype {
-
-    /// <summary>
-    /// The default instance of this type of archetype porter.
-    /// </summary>
-    public static ArchetypePorter<TArchetype> DefaultInstance {
-      get;
-      private set;
-    }
 
     /// <summary>
     /// Key for the name value in the config
@@ -98,11 +36,67 @@ namespace Meep.Tech.Data.IO {
       = "tags";
 
     /// <summary>
-    /// The default package name for archetyps of this type
+    /// The imports folder name
     /// </summary>
-    public abstract string DefaultPackageName {
-      get;
-    }
+    public const string ImportFolderName
+      = "__imports";
+
+    /// <summary>
+    /// The finished imports folder name.
+    /// </summary>
+    public const string ProcessedImportsFolderName
+      = "__processed_imports";
+
+    /// <summary>
+    /// The finished imports folder name.
+    /// </summary>
+    public const string UnProccessedImportsFolderName
+      = "__unprocessed_imports";
+
+    /// <summary>
+    /// Option parameter to override the object name
+    /// </summary>
+    public const string NameOverrideSetting
+      = "Name";
+
+    /// <summary>
+    /// Option parameter to override the object name
+    /// </summary>
+    public const string PagkageNameOverrideSetting
+      = "PackageName";
+
+    /// <summary>
+    /// Option parameter to Move the imported files to the finished imports folder.
+    /// Accepts a bool
+    /// </summary>
+    public const string MoveFinishedFilesToFinishedImportsFolderSetting
+      = "MoveImportedFilesToFinished";
+
+    /// <summary>
+    /// Option parameter specifying a set of files to import came from an Single Archetype Sub-Folder.
+    /// Accepts a bool
+    /// </summary>
+    public const string FromSingleArchetypeFolderImportOptionsKey
+      = "FromSingleArchetypeFolder";
+
+    /// <summary>
+    /// The name of the config json file.
+    /// </summary>
+    public const string DefaultConfigFileName 
+      = "_config.json";
+
+    /// <summary>
+    /// The universe this imports into
+    /// </summary>
+    public Universe Universe
+      => _universe ??= Archetypes.DefaultUniverse;
+    internal Universe _universe;
+
+    /// <summary>
+    /// Quick access to the root mods folder being used.
+    /// </summary>
+    protected string RootModsFolder
+      => Universe.GetModData().RootModsFolder;
 
     /// <summary>
     /// Keys that work for options for imports.
@@ -110,7 +104,8 @@ namespace Meep.Tech.Data.IO {
     public virtual HashSet<string> ValidImportOptionKeys
       => new() {
         NameOverrideSetting,
-        MoveFinishedFilesToFinishedImportsFolderSetting
+        MoveFinishedFilesToFinishedImportsFolderSetting,
+        FromSingleArchetypeFolderImportOptionsKey
       };
 
     /// <summary>
@@ -121,6 +116,37 @@ namespace Meep.Tech.Data.IO {
         NameConfigKey,
         PackageNameConfigKey
       };
+
+    /// <summary>
+    /// The default package name for archetyps of this type
+    /// </summary>
+    public abstract string SubFolderName {
+      get;
+    }
+
+    /// <summary>
+    /// The base type of archetype this imports.
+    /// </summary>
+    public abstract Type ArchetypeBaseType { 
+      get;
+    }
+
+    /// <summary>
+    /// Helper to filter out invalid files for porters.
+    /// </summary>
+    public static IEnumerable<string> FilterOutInvalidFilenames(IEnumerable<string> externalFileAndFolderLocations)
+      => externalFileAndFolderLocations.Where(f => !f.StartsWith(".") && (!f.StartsWith("_") || f == "_config.json"));
+  }
+
+  /// <summary>
+  /// used to im/export archetypes of a specific type from mods
+  /// </summary>
+  public abstract partial class ArchetypePorter<TArchetype> : ArchetypePorter, IArchetypePorter
+    where TArchetype : Meep.Tech.Data.Archetype, IPortableArchetype {
+
+    ///<summary><inheritdoc/></summary>
+    public override Type ArchetypeBaseType 
+      => typeof(TArchetype);
 
     /// <summary>
     /// The user in control of the current game, and imports.
@@ -144,12 +170,14 @@ namespace Meep.Tech.Data.IO {
     /// <summary>
     /// Make a new type of archetype porter with inheritance
     /// </summary>
-    protected ArchetypePorter(Func<string> getCurrentUsersUniqueName) {
+    protected ArchetypePorter(Func<string> getCurrentUsersUniqueName, Universe universe = null) {
       _getCurrentUserName = getCurrentUsersUniqueName;
-      DefaultInstance ??= this;
+      _universe = universe;
     }
 
-    #region Get From Cache
+    #region Get
+
+    #region Archetype From Cache
 
     /// <summary>
     /// <inheritdoc/>
@@ -171,6 +199,173 @@ namespace Meep.Tech.Data.IO {
 
     #endregion
 
+    #region Folders and Keys
+
+    /// <summary>
+    /// <inheritdoc/>
+    /// </summary>
+    public string GetFolderFor(TArchetype portableArchetype) {
+      TArchetype archetype = portableArchetype;
+      return GetArchetypeFolderFromKey(archetype.ResourceKey);
+    }
+
+    /// <summary>
+    /// <inheritdoc/>
+    /// </summary>
+    public string GetArchetypeFolderAndDeconstructKey(string resourceKey, out string resourceName, out string packageName) {
+      string resourceLocation;
+      string[] keyParts = resourceKey.Split("::");
+      if (keyParts.Length == 2) {
+        resourceLocation = keyParts[1];
+        packageName = keyParts[0];
+      }
+      else
+        throw new ArgumentException($"'::' cannot be used in package names or resource names. All resource keys require a package and location key");
+
+      resourceName = Path.GetFileNameWithoutExtension(resourceLocation);
+      return Path.Combine(RootModsFolder, packageName, SubFolderName, new DirectoryInfo(resourceLocation).FullName);
+    }
+
+    /// <summary>
+    /// <inheritdoc/>
+    /// </summary>
+    public string GetArchetypeFolderFromKey(string resourceKey) {
+      string resourceLocation;
+      string packageName;
+      string[] keyParts = resourceKey.Split("::");
+      if (keyParts.Length == 2) {
+        resourceLocation = keyParts[1];
+        packageName = keyParts[0];
+      }
+      else
+        throw new ArgumentException($"'::' cannot be used in package names or resource names. All resource keys require a package and location key");
+
+      return Path.Combine(RootModsFolder, packageName, SubFolderName, new DirectoryInfo(resourceLocation).FullName);
+    }
+
+    /// <summary>
+    /// Construct the keys for a type given the main asset file, config, and options.
+    /// </summary>
+    public virtual (string resourceName, string packageName, string resourceKey) ConstructArchetypeKeys(
+      string primaryAssetFilename,
+      Dictionary<string, object> options,
+      JObject config
+    ) {
+      string resourceName;
+      string packageName;
+      string resourceKey;
+
+      /// Resource Name
+      // check the options for an override first
+      if (options.TryGetValue(NameConfigKey, out var name)) {
+        resourceName = name as string;
+      } // check json config next
+      else if (config == null || (resourceName = config.TryGetValue<string>(NameConfigKey)) == null) {
+        // if it's a loost asset, we use the asset name
+        if (!(options.TryGetValue(FromSingleArchetypeFolderImportOptionsKey, out var found) && found is bool foundBool && foundBool)) {
+          resourceName = Path.GetFileNameWithoutExtension(primaryAssetFilename);
+        } // if it's in a folder, we need to find the right name to use so we can find it again~
+          // this longer name will be trimmed before being returned, but is used to make the resourceKey
+        else {
+          var currentFolder = new DirectoryInfo(primaryAssetFilename);
+
+          resourceName = "";
+          while (currentFolder.Parent != null && currentFolder.Parent.Name != SubFolderName) {
+            resourceName += currentFolder.Name + "/";
+          }
+
+          // we went too far, set it to just the filename, unless the file name is _config:
+          if (resourceName == "" || currentFolder.Parent == null) {
+            resourceName = Path.GetFileNameWithoutExtension(primaryAssetFilename);
+          }
+          else {
+            resourceName = resourceName.Trim('/').Trim();
+          }
+
+          if (resourceName == "_config") {
+            throw new ArgumentException($"_cofig cannot be the name of a resource. Please provide a resource name under the 'name' property in the config");
+          }
+        }
+      }
+
+      if (resourceName is null) {
+        throw new ArgumentNullException(NameConfigKey);
+      }
+
+      /// Package Name
+      if (options.TryGetValue(PackageNameConfigKey, out var package)) {
+        packageName = package as string;
+      } // check json config next
+      else if (config == null || (packageName = config.TryGetValue<string>(PackageNameConfigKey)) == null) {
+        var currentFolder = new DirectoryInfo(primaryAssetFilename);
+
+        if (currentFolder.Parent.Name != ImportFolderName
+           && currentFolder.Parent.Name != ModPorterContext.ModFolderName
+         ) {
+          packageName = null;
+          currentFolder = currentFolder.Parent;
+          while (currentFolder.Parent.Name != ImportFolderName
+            && currentFolder.Parent.Name != ModPorterContext.ModFolderName
+            && currentFolder.Parent != null
+          ) {
+            packageName = currentFolder.Name;
+            currentFolder = currentFolder.Parent;
+          }
+
+          // we went too far... use the default.
+          if (currentFolder.Parent == null || package == null) {
+            packageName = GetDefaultPackageName();
+          }
+        }
+        else packageName = GetDefaultPackageName();
+      }
+
+      if (resourceName is null) {
+        throw new ArgumentNullException(PackageNameConfigKey);
+      }
+
+      resourceKey = packageName + "::" + resourceName;
+
+      if (resourceName.Contains('/')) {
+        resourceName = Path.GetFileNameWithoutExtension(resourceName);
+      }
+
+      return (resourceName, packageName, resourceKey);
+    }
+
+    /// <summary>
+    /// Get the default package name
+    /// </summary>
+    public string GetDefaultPackageName()
+      => _getCurrentUserName() + "'s Custom Assets";
+
+    #endregion
+
+    #region Helpers
+
+    /// <summary>
+    /// Try to get the _config.json from the set of provided files.
+    /// </summary>
+    protected JObject TryToGetConfig(IEnumerable<string> externalFileLocations, out string configFileName) {
+      configFileName = externalFileLocations
+        .FirstOrDefault(fileName => fileName == DefaultConfigFileName);
+      if (configFileName is null) {
+        configFileName = externalFileLocations
+          .FirstOrDefault(fileName => Path.GetExtension(fileName).ToLower() == ".json");
+      }
+      if (configFileName is not null && File.Exists(configFileName)) {
+        return JObject.Parse(
+          File.ReadAllText(configFileName)
+        );
+      }
+      else
+        return new JObject();
+    }
+
+    #endregion
+
+    #endregion
+
     #region Import
 
     #region Find and Import
@@ -179,84 +374,69 @@ namespace Meep.Tech.Data.IO {
     /// <inheritdoc/>
     /// </summary>
     public TArchetype TryToFindAndImportIndividualArchetypeFromModFolder(string resourceKey, Dictionary<string, object> options = null) {
-      string modFolder = GetFolderForModItem(resourceKey, out string resourceName, out string packageName);
+      string modFolder = GetArchetypeFolderAndDeconstructKey(resourceKey, out string resourceName, out string packageName);
 
       // escape safely early
       if (!Directory.Exists(modFolder)) {
         return null;
       }
 
-      string[] parts = resourceKey.Split("::");
-      string packageName = parts.First();
-      string resourcePath = parts.Last();
-
-      string[] effectedFiles = Directory.GetFiles(modFolder);
+      string[] effectedFiles = FilterOutInvalidFilenames(Directory.GetFiles(modFolder)).ToArray();
       TArchetype archetype
-        = _importArchetypesFromExternalFiles(effectedFiles, resourceKey, resourceName, packageName, options)
+        = BuildAllArchetypesFromSingleArchetypeFolder(modFolder, effectedFiles, options, out _, false)
           .First();
 
-      if (options is not null
-        && options.TryGetValue(MoveFinishedFilesToFinishedImportsFolderSetting, out var moveFiles)
-        && (bool)moveFiles
-      ) {
-        _moveFilesToFinishedImportsFolder(archetype.AsSingleItemEnumerable(), effectedFiles, packageName, options);
-      }
       _cacheArchetype(archetype, packageName);
-
 
       return archetype;
     }
-
-    #endregion
-
-    #endregion
-
-    #region Export
-
-
-    ///<summary><inheritdoc/></summary>
-    public string[] SerializeArchetypeToModFolder(TArchetype archetype)
-      => SerializeArchetypeToModFiles(
-        archetype,
-        GetFolderForArchetype(archetype)
-      );
-
-    #endregion
-
-    #region Update and Delete
-
-    #endregion
 
     /// <summary>
     /// <inheritdoc/>
     /// </summary>
-    public TArchetype LoadArchetypeFromModFolder(string resourceKey, Dictionary<string, object> options = null) {
-      string modFolder = GetFolderForModItem(resourceKey, out string name, out string packageName);
+    public TArchetype ImportIndividualArchetypeFromModFolder(string resourceKey, Dictionary<string, object> options = null) {
+      string modFolder = GetArchetypeFolderAndDeconstructKey(resourceKey, out string name, out string packageName);
 
       string[] effectedFiles = Directory.GetFiles(modFolder);
       TArchetype archetype
-        = _importArchetypesFromExternalFiles(effectedFiles, resourceKey, name, packageName, options)
+        = BuildAllArchetypesFromSingleArchetypeFolder(modFolder, effectedFiles, options, out _, false)
           .First();
 
-      if (options is not null
-        && options.TryGetValue(MoveFinishedFilesToFinishedImportsFolderSetting, out var moveFiles)
-          ? (bool)moveFiles
-          : false
-      ) {
-        _moveFilesToFinishedImportsFolder(archetype.AsSingleItemEnumerable(), effectedFiles, packageName, options);
-      }
       _cacheArchetype(archetype, packageName);
 
 
       return archetype;
     }
+
+    #endregion
+
+    #region Bulk Import
 
     /// <summary>
     /// This searches the Mods folder's Archetype-Sub-Folder for this type, and imports all flat contents using ImportAndBuildNewArchetypesFromLooseFilesAndFolders.
     /// Then this goes though each valid Mod folder file in the provided directory and runs the same on each Archetype-Sub-Folder within them as well.
     /// </summary>
     public IEnumerable<TArchetype> ImportAndBuildArchetypesFromModsFolder(Dictionary<string, object> options) {
+      List<TArchetype> builtTypes = new();
 
+      // get all mod packages:
+      foreach (string modFolder in FilterOutInvalidFilenames(Directory.GetDirectories(RootModsFolder))) {
+        // get sub folders for each of them:
+        foreach((string folder, ArchetypePorter porter) in Directory.GetDirectories(modFolder)
+          .Where(f => Universe.GetModData().PortersByArchetypeSubfolder.ContainsKey(Path.GetDirectoryName(f)))
+          .Select(f => (folder: f, porter: Universe.GetModData().PortersByArchetypeSubfolder[Path.GetDirectoryName(f)]))
+        ) {
+          IEnumerable<TArchetype> typesFromFolder = ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
+           FilterOutInvalidFilenames(Directory.GetFiles(modFolder).Concat(Directory.GetDirectories(modFolder).ToHashSet())),
+           options,
+           out _
+          );
+
+          builtTypes.AddRange(typesFromFolder);
+        }
+      }
+
+      return builtTypes;
     }
 
     /// <summary>
@@ -265,7 +445,71 @@ namespace Meep.Tech.Data.IO {
     /// This also packages the results and places the efficient and packaged mods into the mods folder.
     /// </summary>
     public IEnumerable<TArchetype> ImportAndPackageModsFromImportsFolder(Dictionary<string, object> options) {
+      List<TArchetype> builtTypes = new();
+      List<string> proccessedFilesToMove = new();
 
+      /// import all archetypes from the __imports folder
+      string importsFolder = Path.Combine(RootModsFolder, ImportFolderName);
+      // get all mod packages first:
+      foreach (string modFolder in FilterOutInvalidFilenames(Directory.GetDirectories(importsFolder))) {
+        // get sub folders for each of them:
+        foreach ((string folder, ArchetypePorter porter) in Directory.GetDirectories(modFolder)
+          .Where(f => Universe.GetModData().PortersByArchetypeSubfolder.ContainsKey(Path.GetDirectoryName(f)))
+          .Select(f => (folder: f, porter: Universe.GetModData().PortersByArchetypeSubfolder[Path.GetDirectoryName(f)]))
+        ) {
+          IEnumerable<TArchetype> typesFromFolder = ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
+           FilterOutInvalidFilenames(Directory.GetFiles(folder).Concat(Directory.GetDirectories(folder).ToHashSet())),
+           options,
+           out HashSet<string> proccessedFiles
+          );
+
+          proccessedFilesToMove.AddRange(proccessedFiles);
+          builtTypes.AddRange(typesFromFolder);
+        }
+      }
+
+      // get all loose types next:
+      foreach ((string folder, ArchetypePorter porter) in Directory.GetDirectories(importsFolder)
+          .Where(f => Universe.GetModData().PortersByArchetypeSubfolder.ContainsKey(Path.GetDirectoryName(f)))
+          .Select(f => (folder: f, porter: Universe.GetModData().PortersByArchetypeSubfolder[Path.GetDirectoryName(f)]))
+        ) {
+        IEnumerable<TArchetype> typesFromFolder = ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
+         FilterOutInvalidFilenames(Directory.GetFiles(folder).Concat(Directory.GetDirectories(folder).ToHashSet())),
+         options,
+         out HashSet<string> proccessedFiles
+        );
+
+        proccessedFilesToMove.AddRange(proccessedFiles);
+        builtTypes.AddRange(typesFromFolder);
+      }
+
+      /// Package and save asset files and configs that are re-compiled for speed to the mod folder:
+      foreach (TArchetype compiled in builtTypes) {
+        SerializeArchetypeToModFiles(compiled, GetFolderFor(compiled));
+      }
+
+      // clean out the imports folder, moving items to the unprocessed or processed imports folder accordingly
+      _cleanImportsFolder(proccessedFilesToMove.ToHashSet());
+      return builtTypes;
+    }
+
+    void _cleanImportsFolder(HashSet<string> proccessedFilesToMove) {
+      // move proccessed imports
+      foreach(string fileToMove in proccessedFilesToMove) {
+        File.Copy(fileToMove, fileToMove.Replace(ImportFolderName, ProcessedImportsFolderName), true);
+      }
+
+      // remove empty import directories
+      _deleteEmptyDirectoriesRecusivelyUnder(
+        Path.Combine(RootModsFolder, ImportFolderName)
+      );
+
+      // move remaining un-proccessed imports
+      _copyDirectory(
+        Path.Combine(RootModsFolder, ImportFolderName),
+        Path.Combine(RootModsFolder, UnProccessedImportsFolderName),
+        true
+      );
     }
 
     /// <summary>
@@ -273,7 +517,7 @@ namespace Meep.Tech.Data.IO {
     /// It then searches for provided folder names, and searches the folder contents for either a json for config, or the first Asset file to import and ignores all other files in these provided directories.
     /// It then goes though the originally provided loose Asset files (such as pngs) and tries to import each as it's own Archetype.
     /// </summary>
-    public IEnumerable<TArchetype> ImportAndBuildNewArchetypesFromLooseFilesAndFolders(string[] externalFileAndFolderLocations, Dictionary<string, object> options, out IEnumerable<string> proccessedFiles) {
+    public IEnumerable<TArchetype> ImportAndBuildNewArchetypesFromLooseFilesAndFolders(IEnumerable<string> externalFileAndFolderLocations, Dictionary<string, object> options, out HashSet<string> proccessedFiles) {
       List<TArchetype> builtTypes = new();
       List<string> configFiles = new();
       List<string> assetFiles = new();
@@ -282,7 +526,7 @@ namespace Meep.Tech.Data.IO {
       List<string> allProcessedFiles = new();
 
       // for each file that doesn't start with `.`, or doesn't start with `_` and isn't named config.json.
-      foreach (string providedItem in externalFileAndFolderLocations.Where(f => !f.StartsWith(".") && (!f.StartsWith("_") || f == "_config.json"))) {
+      foreach (string providedItem in FilterOutInvalidFilenames(externalFileAndFolderLocations)) {
         FileAttributes attr = File.GetAttributes(providedItem);
 
         if (attr.HasFlag(FileAttributes.Directory)) {
@@ -307,7 +551,7 @@ namespace Meep.Tech.Data.IO {
       while (configFiles.Any()) {
         string currentConfig = configFiles.First();
         string currentConfigDirectory = Path.GetDirectoryName(currentConfig);
-        List<string> assets = assetsToTryToBuildLooselyFrom.ToList();
+        List<string> assets = assetsToTryToBuildLooselyFrom.Except(currentConfig.AsSingleItemEnumerable()).ToList();
 
         // sort assets for this particular config.
         assets.Sort((x, y) => {
@@ -324,9 +568,15 @@ namespace Meep.Tech.Data.IO {
         });
 
         // TODO: add a try here and record failed configs at the end.
-        builtTypes.AddRange(
-          BuildLooselyFromConfig(JObject.Parse(File.ReadAllText(currentConfig)), assets, options, out var processedFiles)
-        );
+        JObject config = JObject.Parse(File.ReadAllText(currentConfig));
+        IEnumerable<TArchetype> assetResourceArchetypes =
+          BuildLooselyFromConfig(config, assets.Prepend(currentConfig), options, out var processedFiles);
+
+        if (assetResourceArchetypes.Any()) {
+          _updateModData(assetResourceArchetypes.First().PackageKey, assetResourceArchetypes.First().ResourceKey, assetResourceArchetypes);
+        }
+
+        builtTypes.AddRange(assetResourceArchetypes);
 
         // remove proccessed files:
         configFiles.RemoveAt(0);
@@ -341,18 +591,23 @@ namespace Meep.Tech.Data.IO {
       // import directories:
       while (archetypeDirectories.Any()) {
         string currentDirectory = archetypeDirectories.First();
-        List<string> folderFiles = Directory.GetFiles(currentDirectory)
-          .Where(f => !f.StartsWith(".") && (!f.StartsWith("_") || f == "_config.json"))
+        List<string> folderFiles = FilterOutInvalidFilenames(Directory.GetFiles(currentDirectory))
           .ToList();
         folderFiles.Sort(_byNameThenByFolder());
-        builtTypes.AddRange(
-          _buildAllFromSingleFolder(
+
+        IEnumerable<TArchetype> assetResourceArchetypes =
+          BuildAllArchetypesFromSingleArchetypeFolder(
             currentDirectory,
             folderFiles,
             options,
             out var processedFiles
-          )
-        );
+          );
+
+        if (assetResourceArchetypes.Any()) {
+          _updateModData(assetResourceArchetypes.First().PackageKey, assetResourceArchetypes.First().ResourceKey, assetResourceArchetypes);
+        }
+
+        builtTypes.AddRange(assetResourceArchetypes);
 
         // remove proccessed files:
         archetypeDirectories.RemoveAt(0);
@@ -368,13 +623,19 @@ namespace Meep.Tech.Data.IO {
       // import loose files:
       while (assetsToTryToBuildLooselyFrom.Any()) {
         string currentAsset = assetsToTryToBuildLooselyFrom.First();
-        builtTypes.AddRange(
+
+        IEnumerable<TArchetype> assetResourceArchetypes =
           BuildLooselyFromAssets(
             assetsToTryToBuildLooselyFrom,
             options,
             out var processedFiles
-          )
-        );
+          );
+
+        if (assetResourceArchetypes.Any()) {
+          _updateModData(assetResourceArchetypes.First().PackageKey, assetResourceArchetypes.First().ResourceKey, assetResourceArchetypes);
+        }
+
+        builtTypes.AddRange(assetResourceArchetypes);
 
         // remove proccessed files:
         assetsToTryToBuildLooselyFrom.RemoveAt(0);
@@ -385,28 +646,54 @@ namespace Meep.Tech.Data.IO {
         }
       }
 
-      proccessedFiles = allProcessedFiles;
+      proccessedFiles = allProcessedFiles.ToHashSet();
       return builtTypes;
     }
 
-    protected abstract IEnumerable<TArchetype> BuildLooselyFromConfig(JObject config, IEnumerable<string> assetFiles, Dictionary<string, object> options, out IEnumerable<string> processedFiles);
+    /// <summary>
+    /// Updates the universes mod package data.
+    /// </summary>
+    void _updateModData(string packageKey, string resourceKey, IEnumerable<TArchetype> builtTypes) {
+      ModPorterContext modData = Universe.GetModData();
 
-    protected abstract IEnumerable<TArchetype> BuildLooselyFromAssets(IEnumerable<string> assetFiles, Dictionary<string, object> options, out IEnumerable<string> processedFiles);
+      if (modData.TryToGetModPackage(packageKey, out var existingPackage)) {
+        existingPackage._addModAsset(ArchetypeBaseType, resourceKey, builtTypes);
+      } else {
+        modData._startNewModPackage(packageKey, resourceKey, builtTypes);
+      }
+    }
+
+    #endregion
+
+    #region Build Functions
 
     /// <summary>
-    /// Serialize this archetype to a set of files in the mod folder.
+    /// Used to build from a collection of files with a specific master config file.
+    /// The master config file is also always provided as the first item in assetFiles.
     /// </summary>
-    /// <param name="archetype">The archetype to serialize into a file or files</param>
-    /// <param name="packageDirectoryPath">The root path to save files to for this archetype</param>
-    /// <returns>The newly serialized file's locations</returns>
-    protected abstract string[] SerializeArchetypeToModFiles(TArchetype archetype, string packageDirectoryPath);
+    /// <param name="config">The provided config.json file</param>
+    /// <param name="assetFiles">All of the asset file locations provided to try to build with</param>
+    /// <param name="options">Import/Build options</param>
+    /// <param name="processedFiles">All files touched/processed by the builder</param>
+    /// <returns>All archetypes built from this config and asset files.</returns>
+    protected abstract IEnumerable<TArchetype> BuildLooselyFromConfig(JObject config, IEnumerable<string> assetFiles, Dictionary<string, object> options, out IEnumerable<string> processedFiles);
+
+    /// <summary>
+    /// Used to build from a collection of files without specific master config file.
+    /// The master config file is also always provided as the first item in assetFiles.
+    /// </summary>
+    /// <param name="assetFiles">All of the asset file locations provided to try to build with</param>
+    /// <param name="options">Import/Build options</param>
+    /// <param name="processedFiles">All files touched/processed by the builder</param>
+    /// <returns>All archetypes built from this config and asset files.</returns>
+    protected abstract IEnumerable<TArchetype> BuildLooselyFromAssets(IEnumerable<string> assetFiles, Dictionary<string, object> options, out IEnumerable<string> processedFiles);
 
     /// <summary>
     /// This processes this folder, and all sub folders, as "single archetype folders".
     /// This means it will search this (and each sub folder if recusive is enabled) for a single config file, or asset to build an archetype form, ignoring files wthat begin with . or _
     /// This just ignores directories with no valid items as well. 
     /// </summary>
-    IEnumerable<TArchetype> _buildAllFromSingleFolder(string folderLocation, IEnumerable<string> folderFiles, Dictionary<string, object> options, out IEnumerable<string> processedFiles, bool recursive = true) {
+    protected virtual IEnumerable<TArchetype> BuildAllArchetypesFromSingleArchetypeFolder(string folderLocation, IEnumerable<string> folderFiles, Dictionary<string, object> options, out IEnumerable<string> processedFiles, bool recursive = true) {
       List<string> folderItems = folderFiles.ToList();
       List<TArchetype> builtTypes = new();
       List<string> allProccessedFiles = new();
@@ -417,7 +704,7 @@ namespace Meep.Tech.Data.IO {
           // if we're doing recursive, check each folder too
           FileAttributes attr = File.GetAttributes(providedItem);
           if (attr.HasFlag(FileAttributes.Directory)) {
-            builtTypes.AddRange(_buildAllFromSingleFolder(folderLocation, folderFiles, options, out var processed, recursive));
+            builtTypes.AddRange(BuildAllArchetypesFromSingleArchetypeFolder(folderLocation, folderFiles, options, out var processed, recursive));
             if (processed is not null) {
               allProccessedFiles.AddRange(processed);
             }
@@ -431,7 +718,7 @@ namespace Meep.Tech.Data.IO {
       string configFile;
       if ((configFile = folderFiles.FirstOrDefault(f => Path.GetExtension(f).ToLower() == ".json")) is not null) {
         // TODO: add a try here and record failed configs at the end.
-        builtTypes.AddRange(BuildLooselyFromConfig(JObject.Parse(File.ReadAllText(configFile)), folderFiles.Except(configFile.AsSingleItemEnumerable()), options, out var processed));
+        builtTypes.AddRange(BuildLooselyFromConfig(JObject.Parse(File.ReadAllText(configFile)), folderFiles.Except(configFile.AsSingleItemEnumerable()).Prepend(configFile), options, out var processed));
         allProccessedFiles.Add(configFile);
         if (processed is not null) {
           allProccessedFiles.AddRange(processed);
@@ -449,197 +736,91 @@ namespace Meep.Tech.Data.IO {
     }
 
     /// <summary>
-    /// <inheritdoc/>
+    /// Helper function for building the final archetypes using the correct ctor
     /// </summary>
-    public string GetFolderForArchetype(IPortableArchetype portableArchetype) {
-      TArchetype archetype = (TArchetype)portableArchetype;
-      return GetFolderForModItem(archetype.Id.Name, archetype.PackageKey);
-    }
-
-    /// <summary>
-    /// <inheritdoc/>
-    /// </summary>
-    public string GetFolderForModItem(string resourceKey, out string resourceName, out string packageName) {
-      packageName = null;
-      string[] keyParts = resourceKey.Split("::");
-      if(keyParts.Length == 1) {
-        resourceName = resourceKey;
-      } else if(keyParts.Length == 2) {
-        resourceName = keyParts[1];
-        packageName = keyParts[0];
-      } else
-        throw new ArgumentException($"'::' cannot be used in backage names or resource names");
-      return GetFolderForModItem(resourceName, packageName);
-    }
-
-    /// <summary>
-    /// <inheritdoc/>
-    /// </summary>
-    public string GetFolderForModItem(string name, string packageName = null) {
-      var modFolder = RootModsFolder;
-      if(packageName is null) {
-        modFolder = Path.Combine(modFolder, DefaultPackageName, name.Replace(".", "/"));
-      } else {
-        modFolder = Path.Combine(modFolder, packageName.Replace(".", "/"), DefaultPackageName, name.Replace(".", "/"));
-      }
-
-      return modFolder;
-    }
-
-    /// <summary>
-    /// <inheritdoc/>
-    /// </summary>
-    public bool TryToMoveRenamedArchetypeFolder(string oldName, IPortableArchetype archetype) {
-      string newFolderName = GetFolderForArchetype(archetype);
-
-      if(System.IO.Directory.Exists(newFolderName)) {
-        return false;
-      }
-
-      string oldFolderName = GetFolderForModItem(oldName, archetype.PackageKey);
-      Directory.CreateDirectory(newFolderName);
-      _copyDirectory(oldFolderName, newFolderName, true);
-      return true;
-    }
-
-    /// <summary>
-    /// <inheritdoc/>
-    /// </summary>
-    public void ForceMoveRenamedArchetypeFolder(string oldName, IPortableArchetype archetype) {
-      string newFolderName = GetFolderForArchetype(archetype);
-
-      /// empty the target folder if it already exists.
-      if(System.IO.Directory.Exists(newFolderName)) {
-        DirectoryInfo directoryInfo = new(newFolderName);
-        directoryInfo.EnumerateFiles().ForEach(file => file.Delete());
-        directoryInfo.EnumerateDirectories().ForEach(subDirectory => subDirectory.Delete(true));
-      }
-
-      string oldFolderName = GetFolderForModItem(oldName, archetype.PackageKey);
-      Directory.CreateDirectory(newFolderName);
-      _copyDirectory(oldFolderName, newFolderName, true);
-    }
-
-    /// <summary>
-    /// Construct the keys for a type given the main asset file, config, and options.
-    /// </summary>
-    protected virtual (string resourceName, string packageName, string resourceKey) ConstructArchetypeKeys(
-      string primaryAssetFilename,
-      bool fromSingleArchetypeFolder,
-      Dictionary<string, object> options,
-      JObject config
+    protected virtual IEnumerable<TArchetype> BuildArchetypeFromCompiledData(
+      string resourceName,
+      string packageName,
+      string resourceKey,
+      JObject config,
+      Dictionary<string, object> importOptionsAndAssets,
+      Universe universe
     ) {
-      string resourceName;
-      string packageName;
-      string resourceKey;
+      Type typeToBuild = ArchetypeBaseType;
+      var porterConstructor = GetPorterConstructorForArchetypeType(typeToBuild);
 
-      /// Resource Name
-      // check the options for an override first
-      if (options.TryGetValue(NameConfigKey, out var name)) {
-        resourceName = name as string;
-      } // check json config next
-      else if (config.TryGetValue(NameConfigKey, out JToken nameToken)) {
-        resourceName = nameToken.Value<string>();
-      } else {
-        // if it's a loost asset, we use the asset name
-        if (!fromSingleArchetypeFolder) {
-          resourceName = Path.GetFileName(primaryAssetFilename);
-        }
-
-        // if it's in a folder, we need to find the right name to use so we can find it again~
-        // this longer name will be trimmed before being returned, but is used to make the resourceKey
-        var currentFolder = new DirectoryInfo(primaryAssetFilename);
-
-        resourceName = "";
-        while (currentFolder.Parent != null && currentFolder.Parent.Name != DefaultPackageName) {
-          resourceName += currentFolder.Name + "/";
-        }
-
-        // we went too far, set it to just the filename, unless the file name is _config:
-        if (resourceName == "" || currentFolder.Parent == null) {
-          resourceName = Path.GetFileName(primaryAssetFilename);
-        }
-        else {
-          resourceName = resourceName.Trim('/').Trim();
-        }
-
-        if (resourceName == "_config") {
-          throw new ArgumentException($"_cofig cannot be the name of a resource. Please provide a resource name under the 'name' property in the config");
-        }
-      }
-
-      if (resourceName is null) {
-        throw new ArgumentNullException(NameConfigKey);
-      }
-
-      /// Package Name
-      if (options.TryGetValue(NameConfigKey, out var package)) {
-        packageName = package as string;
-      } // check json config next
-      else if (config.TryGetValue(NameConfigKey, out JToken packageToken)) {
-        packageName = packageToken.Value<string>();
-      }
-      else {
-        var currentFolder = new DirectoryInfo(primaryAssetFilename);
-
-        if (currentFolder.Parent.Name != ImportFolderName
-           && currentFolder.Parent.Name != ModFolderName
-         ) {
-          packageName = null;
-          currentFolder = currentFolder.Parent;
-          while (currentFolder.Parent.Name != ImportFolderName
-            && currentFolder.Parent.Name != ModFolderName
-            && currentFolder.Parent != null
-          ) {
-            packageName = currentFolder.Name;
-            currentFolder = currentFolder.Parent;
-          }
-
-          // we went too far... use the default.
-          if (currentFolder.Parent == null || package == null) {
-            packageName = GetDefaultPackageName();
-          }
-        }
-        else packageName = GetDefaultPackageName();
-      }
-
-      if (resourceName is null) {
-        throw new ArgumentNullException(NameConfigKey);
-      }
-
-      resourceKey = packageName + "::" + resourceName;
-
-      if (resourceName.Contains('/')) {
-        resourceName = Path.GetFileName(resourceName);
-      }
-
-      return (resourceName, packageName, resourceKey);
+      return ((TArchetype)(porterConstructor.Invoke(new object[] {
+        resourceName, packageName, resourceKey, config, importOptionsAndAssets, universe
+      }))).AsSingleItemEnumerable();
     }
 
     /// <summary>
-    /// Get the default package name
+    /// Can be used to help get the porter constructor for an archetype.
     /// </summary>
-    protected string GetDefaultPackageName()
-      => _getCurrentUserName() + "'s Custom Assets";
+    protected static ConstructorInfo GetPorterConstructorForArchetypeType(Type typeToBuild) {
+      ConstructorInfo porterConstructor = typeToBuild.GetConstructor(
+        BindingFlags.Instance | BindingFlags.NonPublic,
+        null,
+        new Type[] {
+          typeof(string),
+          typeof(string),
+          typeof(string),
+          typeof(JObject),
+          typeof(Dictionary<string, object>),
+          typeof(Universe)
+        },
+        null
+      );
+      if (porterConstructor is null) {
+        throw new Exception($"Archetype Type: {typeToBuild.FullName}, does not have a non-public constructor with the arguments: (string)resourceName, (string)packageName, (string)resourceKey, (JObject)cofig, (Dictionary<string, object>)importOptionsAndAssets, (Universe)universe.");
+      }
+
+      return porterConstructor;
+    }
+
+    #endregion
+
+    void _cacheArchetype(TArchetype archetype, string packageName = null) {
+      _cachedResources.Add(archetype.ResourceKey, archetype);
+      if (_cachedResourcesByPackage.TryGetValue(packageName ?? "", out var existingSet)) {
+        existingSet.Add(archetype.ResourceKey, archetype);
+      }
+      else if (!string.IsNullOrWhiteSpace(packageName)) {
+        _cachedResourcesByPackage.Add(packageName, new() {
+          {
+            archetype.ResourceKey,
+            archetype
+          }
+        });
+      }
+    }
+
+    #endregion
+
+    #region Export
 
     /// <summary>
-    /// Try to get the _config.json from the set of provided files.
+    /// Serialize this archetype to a set of files in the mod folder.
     /// </summary>
-    protected JObject TryToGetConfig(IEnumerable<string> externalFileLocations, out string configFileName) {
-      configFileName = externalFileLocations
-        .FirstOrDefault(fileName => fileName == DefaultConfigFileName);
-      if (configFileName is null) {
-        configFileName = externalFileLocations
-          .FirstOrDefault(fileName => Path.GetExtension(fileName).ToLower() == ".json");
-      }
-      if (configFileName is not null && File.Exists(configFileName)) {
-        return JObject.Parse(
-          File.ReadAllText(configFileName)
-        );
-      }
-      else
-        return new JObject();
-    }
+    /// <param name="archetype">The archetype to serialize into a file or files</param>
+    /// <param name="archetypeModFolderPath">The root path to save files to for this archetype</param>
+    /// <returns>The newly serialized file's locations</returns>
+    protected abstract string[] SerializeArchetypeToModFiles(TArchetype archetype, string archetypeModFolderPath);
+
+    ///<summary><inheritdoc/></summary>
+    public string[] SerializeArchetypeToModFolder(TArchetype archetype)
+      => SerializeArchetypeToModFiles(
+        archetype,
+        GetFolderFor(archetype)
+      );
+
+    #endregion
+
+    #region Update and Delete
+
+    #endregion
+
+    #region Utility
 
     static void _copyDirectory(string sourceDir, string destinationDir, bool recursive) {
       // Get information about the source directory
@@ -670,55 +851,26 @@ namespace Meep.Tech.Data.IO {
       }
     }
 
-    void _cacheArchetype(TArchetype archetype, string packageName = null) {
-      _cachedResources.Add(archetype.ResourceKey, archetype);
-      if(_cachedResourcesByPackage.TryGetValue(packageName ?? "", out var existingSet)) {
-        existingSet.Add(archetype.ResourceKey, archetype);
-      } else if(!string.IsNullOrWhiteSpace(packageName)) {
-        _cachedResourcesByPackage.Add(packageName, new() {
-          {
-            archetype.ResourceKey,
-            archetype
-          }
-        });
-      }
-    }
+    static void _deleteEmptyDirectoriesRecusivelyUnder(string parentDir) {
+      // Get information about the source directory
+      var dir = new DirectoryInfo(parentDir);
 
-    void _moveFilesToFinishedImportsFolder(IEnumerable<TArchetype> compiledArchetypes, string[] fileNames, string packageName = null, Dictionary<string, object> options = null) {
-      /// Save files that are re-compiled for speed to the mod folder:
-      foreach(TArchetype compiled in compiledArchetypes) {
-        SerializeArchetypeToModFiles(compiled, GetFolderForArchetype(compiled));
-      }
+      // Check if the source directory exists
+      if(!dir.Exists)
+        throw new DirectoryNotFoundException($"Source directory not found: {dir.FullName}");
 
-      /// Move the old files to exports
-      string exportFolder
-        = Path.Combine(RootModsFolder, IArchetypePorter.FinishedImportsFolderName, packageName ?? compiledArchetypes.First().DefaultPackageKey);
-      if(packageName is not null) {
-        exportFolder = Path.Combine(exportFolder, compiledArchetypes.First().DefaultPackageKey);
-      }
+      // Cache directories before we start copying
+      DirectoryInfo[] dirs = dir.GetDirectories();
 
-      // Move each untouched file to output:
-      Directory.CreateDirectory(exportFolder);
-      foreach(string fileName in fileNames) {
-        System.IO.File.Move(fileName, Path.Combine(exportFolder, Path.GetFileName(fileName)));
-        // TODO: these any file lookups could probably be quicker:
-        if(!Directory.GetParent(fileName).GetFiles().Any()) {
-          if(Directory.GetParent(fileName).Name == IArchetypePorter.ImportFolderName) {
-            throw new Exception($"Folder deleting wrong");
-          }
-          Directory.GetParent(fileName).Delete();
-        }
-
-        if(packageName is not null) {
-          if(!Directory.GetParent(fileName).GetFiles().Any() && !Directory.GetParent(fileName).GetDirectories().Any()) {
-            if(Directory.GetParent(fileName).Name == IArchetypePorter.ImportFolderName) {
-              throw new Exception($"Folder deleting gone wrong");
-            }
-            Directory.GetParent(fileName).Parent.Delete();
-          }
+      // If recursive and copying subdirectories, recursively call this method
+      foreach(DirectoryInfo subDir in dirs) {
+        _deleteEmptyDirectoriesRecusivelyUnder(subDir.FullName);
+        if (!subDir.GetFiles().Any() || !subDir.GetDirectories().Any()) {
+          subDir.Delete();
         }
       }
     }
+
     static Comparison<string> _byNameThenByFolder() {
       return (string x, string y) => {
         string fileA = Path.GetFileName(x);
@@ -731,8 +883,11 @@ namespace Meep.Tech.Data.IO {
       };
     }
 
+    #endregion
+
     #region IPorter
-    IEnumerable<Archetype> IArchetypePorter.ImportAndBuildNewArchetypesFromLooseFilesAndFolders(string[] externalFileAndFolderLocations, Dictionary<string, object> options, out IEnumerable<string> processedFiles)
+
+    IEnumerable<Archetype> IArchetypePorter.ImportAndBuildNewArchetypesFromLooseFilesAndFolders(string[] externalFileAndFolderLocations, Dictionary<string, object> options, out HashSet<string> processedFiles)
       => ImportAndBuildNewArchetypesFromLooseFilesAndFolders(externalFileAndFolderLocations, options, out processedFiles);
 
     IEnumerable<Archetype> IArchetypePorter.ImportAndBuildNewArchetypesFromModsFolder(Dictionary<string, object> options)
@@ -748,7 +903,7 @@ namespace Meep.Tech.Data.IO {
       => TryToGetGetCachedArchetype(resourceKey);
 
     Archetype IArchetypePorter.LoadArchetypeFromModFolder(string resourceKey, Dictionary<string, object> options)
-      => LoadArchetypeFromModFolder(resourceKey, options);
+      => ImportIndividualArchetypeFromModFolder(resourceKey, options);
 
     Archetype IArchetypePorter.TryToFindArchetypeAndLoadFromModFolder(string resourceKey, Dictionary<string, object> options)
       => TryToFindAndImportIndividualArchetypeFromModFolder(resourceKey, options);
@@ -756,181 +911,9 @@ namespace Meep.Tech.Data.IO {
     string[] IArchetypePorter.SerializeArchetypeToModFolder(Archetype archetype)
       => SerializeArchetypeToModFolder((TArchetype)archetype);
 
+    string IArchetypePorter.GetFolderFor(Archetype portableArchetype)
+      => GetFolderFor((TArchetype)portableArchetype);
+
     #endregion
-
-    /// <summary>
-    /// <inheritdoc/>
-    /// </summary>
-    /*public IEnumerable<TArchetype> ImportAndBuildNewArchetypeFromFile(string externalFileLocation, Dictionary<string, object> options = null) {
-      string name = options is not null && options.TryGetValue(IArchetypePorter.NameOverrideSetting, out var nameObj)
-         ? (string)nameObj
-         : null;
-      string packageName = options is not null && options.TryGetValue(IArchetypePorter.PagkageNameOverrideSetting, out var pkgNameObj)
-         ? (string)pkgNameObj
-         : null;
-
-      string resourceKey = GetResourceKeyFromFileLocationAndSettings(externalFileLocation, ref packageName, ref name);
-      if (_cachedResources.ContainsKey(resourceKey)) {
-        int incrementor = 0;
-        string fixedKey;
-        do {
-          fixedKey = resourceKey + $" ({++incrementor})";
-        } while (_cachedResources.ContainsKey(fixedKey));
-
-        resourceKey = fixedKey;
-      }
-
-      List<TArchetype> archetypes
-        = _importArchetypesFromExternalFile(externalFileLocation, resourceKey, name, packageName, options)
-          .ToList();
-
-      if (options is not null
-        && options.TryGetValue(IArchetypePorter.MoveFinishedFilesToFinishedImportsFolderSetting, out var moveFiles)
-          ? (bool)moveFiles
-          : false
-      ) {
-        _moveFilesToFinishedImportsFolder(archetypes, new string[] { externalFileLocation }, packageName, options);
-      }
-
-      foreach (TArchetype archetype in archetypes) {
-        _cacheArchetype(archetype, packageName);
-      }
-
-      return archetypes;
-    }
-
-    /// <summary>
-    /// <inheritdoc/>
-    /// </summary>
-    public IEnumerable<TArchetype> ImportAndBuildNewArchetypeFromFolder(string externalFolderLocation, Dictionary<string, object> options) {
-      string name = options is not null && options.TryGetValue(IArchetypePorter.NameOverrideSetting, out var nameObj)
-         ? (string)nameObj
-         : null;
-
-      if (name is null) {
-        name = Path.GetDirectoryName(externalFolderLocation);
-      }
-
-      string packageName = null;
-      string resourceKey = GetResourceKeyFromFileLocationAndSettings(externalFolderLocation, ref packageName, ref name);
-      if (_cachedResources.ContainsKey(resourceKey)) {
-        int incrementor = 0;
-        string fixedKey;
-        do {
-          fixedKey = resourceKey + $" ({++incrementor})";
-        } while (_cachedResources.ContainsKey(fixedKey));
-
-        resourceKey = fixedKey;
-      }
-
-      string[] effectedFiles = Directory.GetFiles(externalFolderLocation);
-      IEnumerable<TArchetype> archetypes = _importArchetypesFromExternalFiles(effectedFiles, resourceKey, name, packageName, options);
-
-      if (options is not null
-        && options.TryGetValue(IArchetypePorter.MoveFinishedFilesToFinishedImportsFolderSetting, out var moveFiles)
-          ? (bool)moveFiles
-          : false
-      ) {
-        _moveFilesToFinishedImportsFolder(archetypes, effectedFiles, packageName, options);
-      }
-      foreach (TArchetype archetype in archetypes) {
-        _cacheArchetype(archetype, packageName);
-      }
-
-
-      return archetypes;
-    }
-    
-    public IEnumerable<TArchetype> ImportAndBuildNewArchetypeFromFiles(string[] externalFileLocations, Dictionary<string, object> options) {
-      string name = options is not null && options.TryGetValue(IArchetypePorter.NameOverrideSetting, out var nameObj)
-         ? (string)nameObj
-         : null;
-
-      string defaultNameFile = externalFileLocations.First(fileName => fileName != IArchetypePorter.ConfigFileName);
-      string packageName = null;
-      string resourceKey = GetResourceKeyFromFileLocationAndSettings(defaultNameFile, ref packageName, ref name);
-      if(_cachedResources.ContainsKey(resourceKey)) {
-        int incrementor = 0;
-        string fixedKey;
-        do {
-          fixedKey = resourceKey + $" ({++incrementor})";
-        } while(_cachedResources.ContainsKey(fixedKey));
-
-        resourceKey = fixedKey;
-      }
-
-      IEnumerable<TArchetype> archetypes
-        = _importArchetypesFromExternalFiles(externalFileLocations, resourceKey, name, packageName, options);
-
-      if(options is not null
-        && options.TryGetValue(IArchetypePorter.MoveFinishedFilesToFinishedImportsFolderSetting, out var moveFiles)
-        && (bool)moveFiles
-      ) {
-        _moveFilesToFinishedImportsFolder(archetypes, externalFileLocations, packageName, options);
-      }
-
-      foreach(TArchetype archetype in archetypes) {
-        _cacheArchetype(archetype);
-      }
-
-      return archetypes;
-    }*/
-
-    /// <summary>
-    /// Used to make a new key for a new resouce made by the current user
-    /// </summary>
-    /*public virtual string GetResourceKeyFromFileLocationAndSettings(string externalFileLocation, ref string packageName, ref string name) {
-      string key = "";
-      string packageFolderKey = "";
-      string nameFolderKey = "";
-      if(packageName is null || name is null) {
-        var currentFolder = new DirectoryInfo(externalFileLocation);
-
-        if(name is null) {
-          while(currentFolder.Name != DefaultPackageName) {
-            nameFolderKey = currentFolder.Name + "." + nameFolderKey;
-            currentFolder = currentFolder.Parent;
-          }
-        }
-
-        if(packageName is null
-          && currentFolder.Parent.Name != IArchetypePorter.ImportFolderName
-          && currentFolder.Parent.Name != IArchetypePorter.ModFolderName
-        ) {
-          currentFolder = currentFolder.Parent;
-          while(currentFolder.Parent.Name != IArchetypePorter.ImportFolderName
-            && currentFolder.Parent.Name != IArchetypePorter.ModFolderName) {
-            packageFolderKey = currentFolder.Name + "." + packageFolderKey;
-            currentFolder = currentFolder.Parent;
-          }
-        }
-
-        packageName ??= packageFolderKey.Trim('.');
-        name ??= nameFolderKey.Trim('.');
-      }
-
-      if(!string.IsNullOrWhiteSpace(packageName)) {
-        key += packageName + "::";
-      }
-
-      return key + (name = Path.GetFileNameWithoutExtension(name ?? externalFileLocation));
-    }
-
-    /// <summary>
-    /// Correct package name, resource key, etc according to the config values:
-    /// </summary>
-    protected string CorrectBaseKeysAndNamesForConfigValues(string externalFileLocation, ref string name, ref string packageKey, JObject config) {
-      name = config.TryGetValue(NameConfigKey, out JToken value)
-        ? value.Value<string>()
-        : name;
-      packageKey = config.TryGetValue(PackageNameConfigKey, out JToken value2)
-        ? value2.Value<string>()
-        : packageKey;
-      return GetResourceKeyFromFileLocationAndSettings(
-         externalFileLocation,
-         ref packageKey,
-         ref name
-       );
-    }*/
   }
 }

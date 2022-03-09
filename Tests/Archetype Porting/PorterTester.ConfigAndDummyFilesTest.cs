@@ -3,6 +3,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Meep.Tech.Data.IO.Tests {
@@ -14,12 +15,11 @@ namespace Meep.Tech.Data.IO.Tests {
     /// The config will be applied to the default dummy json file provided,
     /// * Unless there's more than one, and the default chosen is not named _config.json; In that case it will throw a TestFailed exception.
     /// </summary>
-    public class ConfigAndDummyFilesTest : Test {
+    public class ImportWithConfigAndDummyFilesTest : Test {
       readonly JObject _config;
       readonly Dictionary<string, object> _options;
       readonly HashSet<string> _dummyFileSystem;
-      readonly string _uniqueTestName;
-      readonly Func<IEnumerable<TArchetype>, TestResult> _validateCreatedTypes;
+      readonly Func<IEnumerable<TArchetype>, IEnumerable<string>, TestResult> _validateCreatedTypesAndProccessedFiles;
       string _testRoot;
       string _outerTestBufferFolder;
       IEnumerable<TArchetype> _createdArchetypes;
@@ -29,22 +29,25 @@ namespace Meep.Tech.Data.IO.Tests {
       /// </summary>
       /// <param name="dummyFileSystem">Files provided to the Porter.Tester running this, but with the location in the dummy filesystem, starting with ./ or ../ depending. 3 empty parent folders are added to this dummy file system as well. If a json config is provided, this should also include an .json file that was not passed into the test runner to overwrite with the provided json config.</param>
       /// <param name="config">the override for the default json config</param>
-      /// <param name="validateCreatedTypes">Used to validate the test and the type, and return the test result</param>
-      public ConfigAndDummyFilesTest(string uniqueTestName, HashSet<string> dummyFileSystem, Func<IEnumerable<TArchetype>, TestResult> validateCreatedTypes, JObject config = null, Dictionary<string, object> options = null) {
-        _uniqueTestName = uniqueTestName;
+      /// <param name="validateCreatedTypesAndProccessedFiles">Used to validate the test and the type, and return the test result</param>
+      public ImportWithConfigAndDummyFilesTest(string uniqueTestName, HashSet<string> dummyFileSystem, Func<IEnumerable<TArchetype>, IEnumerable<string>, TestResult> validateCreatedTypesAndProccessedFiles, JObject config = null, Dictionary<string, object> options = null) {
+        UniqueTestName = uniqueTestName;
         _config = config;
         _options = options ?? new();
         _dummyFileSystem = dummyFileSystem;
-        _validateCreatedTypes = validateCreatedTypes;
+        _validateCreatedTypesAndProccessedFiles = validateCreatedTypesAndProccessedFiles;
       }
 
       protected override void Initalize(PorterTester<TArchetype> testRunner) {
         /// set up the dummy file system:
-        _outerTestBufferFolder = Path.Combine(testRunner.TestModsFolder, "___dummy_file_system_for_tests__root", $"__{_uniqueTestName}__outer_folder");
-        _testRoot = Path.Combine(_outerTestBufferFolder, "___dummy_outer_parent_folder", "___dummy_middle_parent_folder", "___dummy_inner_parent_folder", $"__{_uniqueTestName}");
+        _outerTestBufferFolder = Path.Combine(testRunner.TestModsFolder, $"__{UniqueTestName}");
+        _testRoot = Path.Combine(_outerTestBufferFolder, "__dummy_op", "__dummy_ip", $"__test");
         Directory.CreateDirectory(_testRoot);
 
         List<string> createdDummyFiles = new();
+
+
+        HashSet<string> potentialConfigPlaceholderFiles = _config is not null ? _dummyFileSystem.Where(f => Path.GetExtension(f).ToLower() == ".json").ToHashSet() : null;
         foreach (string dummyFileLocation in _dummyFileSystem) {
           if (Regex.Matches(dummyFileLocation, "../").Count > 3) {
             throw new ArgumentException($"Dummy file system files cannot have more than 3 ../ occurences, as the dummy file system isn't created any deeper.");
@@ -56,26 +59,40 @@ namespace Meep.Tech.Data.IO.Tests {
             string createdDummyFile = Path.Combine(_testRoot, dummyFileLocation);
             File.Copy(dummyFileSource, createdDummyFile);
             createdDummyFiles.Add(createdDummyFile);
+            potentialConfigPlaceholderFiles?.Remove(dummyFileLocation);
           }
+        }
+
+        // if we need to add a config.
+        if (_config != null) {
+          string dummyConfigFileLocation;
+          // if we found any .json files that qualify as potential config placeholder files.
+          if (potentialConfigPlaceholderFiles.Any()) {
+            // get the first one
+            dummyConfigFileLocation = potentialConfigPlaceholderFiles.First();
+          } else // if we didn't find any placeholders. build the default one in the root
+            dummyConfigFileLocation 
+              = Path.Combine(_testRoot, ArchetypePorter.DefaultConfigFileName);
+
+          File.WriteAllText(dummyConfigFileLocation, _config.ToString());
+          createdDummyFiles.Add(dummyConfigFileLocation);
         }
       }
 
       protected override TestResult RunTest(PorterTester<TArchetype> testRunner) {
-        _createdArchetypes = testRunner.Porter.ImportAndBuildNewArchetypesFromFilesAndFolders(
-          Directory.GetFiles(_testRoot), _options 
+        _createdArchetypes = testRunner.Porter.ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
+          ArchetypePorter.FilterOutInvalidFilenames(Directory.GetFiles(_testRoot)).ToArray(),
+          _options,
+          out HashSet<string> processedFiles
         );
 
-        return _validateCreatedTypes(_createdArchetypes);
+        return _validateCreatedTypesAndProccessedFiles(_createdArchetypes, processedFiles);
       }
 
       protected override void DeInitialize(PorterTester<TArchetype> testRunner) {
         _createdArchetypes.ForEach(a => a.Unload());
         Directory.Delete(_outerTestBufferFolder, true);
       }
-    }
-
-    protected bool TryToGetDummyFile(string fileName, out string dummyFileFullSystemLocation) {
-      throw new NotImplementedException();
     }
   }
 }
