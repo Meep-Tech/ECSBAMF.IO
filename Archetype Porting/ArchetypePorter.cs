@@ -1,4 +1,5 @@
 ﻿using Meep.Tech.Collections.Generic;
+using Meep.Tech.Data.IO;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
@@ -66,13 +67,6 @@ namespace Meep.Tech.Data.IO {
       = "PackageName";
 
     /// <summary>
-    /// Option parameter to Move the imported files to the finished imports folder.
-    /// Accepts a bool
-    /// </summary>
-    public const string MoveFinishedFilesToFinishedImportsFolderSetting
-      = "MoveImportedFilesToFinished";
-
-    /// <summary>
     /// Option parameter specifying a set of files to import came from an Single Archetype Sub-Folder.
     /// Accepts a bool
     /// </summary>
@@ -104,7 +98,6 @@ namespace Meep.Tech.Data.IO {
     public virtual HashSet<string> ValidImportOptionKeys
       => new() {
         NameOverrideSetting,
-        MoveFinishedFilesToFinishedImportsFolderSetting,
         FromSingleArchetypeFolderImportOptionsKey
       };
 
@@ -136,6 +129,12 @@ namespace Meep.Tech.Data.IO {
     /// </summary>
     public static IEnumerable<string> FilterOutInvalidFilenames(IEnumerable<string> externalFileAndFolderLocations)
       => externalFileAndFolderLocations.Where(f => !f.StartsWith(".") && (!f.StartsWith("_") || f == "_config.json"));
+
+    /// <summary>
+    /// Helper function to get all the valid flat files and directory names that the importer uses.
+    /// </summary>
+    public static IEnumerable<string> GetValidFlatFilesAndDirectoriesFromDirectory(string folder) 
+      => FilterOutInvalidFilenames(Directory.GetFiles(folder).Concat(Directory.GetDirectories(folder).ToHashSet()));
   }
 
   /// <summary>
@@ -267,16 +266,17 @@ namespace Meep.Tech.Data.IO {
         } // if it's in a folder, we need to find the right name to use so we can find it again~
           // this longer name will be trimmed before being returned, but is used to make the resourceKey
         else {
-          var currentFolder = new DirectoryInfo(primaryAssetFilename);
+          var currentFolder = new DirectoryInfo(Path.GetDirectoryName(primaryAssetFilename));
 
           resourceName = "";
           while (currentFolder.Parent != null && currentFolder.Parent.Name != SubFolderName) {
-            resourceName += currentFolder.Name + "/";
+            resourceName = currentFolder.Name + "/" + resourceName;
+            currentFolder = currentFolder.Parent;
           }
 
           // we went too far, set it to just the filename, unless the file name is _config:
           if (resourceName == "" || currentFolder.Parent == null) {
-            resourceName = Path.GetFileNameWithoutExtension(primaryAssetFilename);
+            resourceName = Path.GetDirectoryName(primaryAssetFilename);
           }
           else {
             resourceName = resourceName.Trim('/').Trim();
@@ -304,9 +304,9 @@ namespace Meep.Tech.Data.IO {
          ) {
           packageName = null;
           currentFolder = currentFolder.Parent;
-          while (currentFolder.Parent.Name != ImportFolderName
+          while (currentFolder.Parent != null
+            && currentFolder.Parent.Name != ImportFolderName
             && currentFolder.Parent.Name != ModPorterContext.ModFolderName
-            && currentFolder.Parent != null
           ) {
             packageName = currentFolder.Name;
             currentFolder = currentFolder.Parent;
@@ -374,7 +374,7 @@ namespace Meep.Tech.Data.IO {
     /// <inheritdoc/>
     /// </summary>
     public TArchetype TryToFindAndImportIndividualArchetypeFromModFolder(string resourceKey, Dictionary<string, object> options = null) {
-      string modFolder = GetArchetypeFolderAndDeconstructKey(resourceKey, out string resourceName, out string packageName);
+      string modFolder = GetArchetypeFolderAndDeconstructKey(resourceKey, out _, out string packageName);
 
       // escape safely early
       if (!Directory.Exists(modFolder)) {
@@ -395,7 +395,7 @@ namespace Meep.Tech.Data.IO {
     /// <inheritdoc/>
     /// </summary>
     public TArchetype ImportIndividualArchetypeFromModFolder(string resourceKey, Dictionary<string, object> options = null) {
-      string modFolder = GetArchetypeFolderAndDeconstructKey(resourceKey, out string name, out string packageName);
+      string modFolder = GetArchetypeFolderAndDeconstructKey(resourceKey, out _, out string packageName);
 
       string[] effectedFiles = Directory.GetFiles(modFolder);
       TArchetype archetype
@@ -404,8 +404,57 @@ namespace Meep.Tech.Data.IO {
 
       _cacheArchetype(archetype, packageName);
 
-
       return archetype;
+    }
+
+    /// <summary>
+    /// <inheritdoc/>
+    /// </summary>
+    public IEnumerable<TArchetype> TryToFindAndImportMod(string modPackageNameOrResourceKey, Dictionary<string, object> options = null) {
+      string modPackageName = modPackageNameOrResourceKey;
+      if (modPackageNameOrResourceKey.Contains("::")) {
+        modPackageName = modPackageNameOrResourceKey.Split("::").First();
+      }
+      string modPackageFolder = Path.Combine(RootModsFolder, modPackageName);
+
+      // escape safely early
+      if (!Directory.Exists(modPackageFolder)) {
+        return null;
+      }
+
+      return _importAllOfThisTypeFromModFolder(modPackageFolder, options);
+    }
+
+    /// <summary>
+    /// <inheritdoc/>
+    /// </summary>
+    public bool TryToFindAndImportMod(string modPackageNameOrResourceKey, out IEnumerable<TArchetype> importedTypes, Dictionary<string, object> options = null) {
+      string modPackageName = modPackageNameOrResourceKey;
+      if (modPackageNameOrResourceKey.Contains("::")) {
+        modPackageName = modPackageNameOrResourceKey.Split("::").First();
+      }
+      string modPackageFolder = Path.Combine(RootModsFolder, modPackageName);
+
+      // escape safely early
+      if (!Directory.Exists(modPackageFolder)) {
+        return (importedTypes = Enumerable.Empty<TArchetype>()).Any();
+      }
+
+      importedTypes = _importAllOfThisTypeFromModFolder(modPackageFolder, options);
+      return importedTypes.Any();
+    }
+
+    /// <summary>
+    /// <inheritdoc/>
+    /// </summary>
+    public IEnumerable<TArchetype> ImportMod(string modPackageNameOrResourceKey, Dictionary<string, object> options = null) {
+      string modPackageName = modPackageNameOrResourceKey;
+      if (modPackageNameOrResourceKey.Contains("::")) {
+        modPackageName = modPackageNameOrResourceKey.Split("::").First();
+      }
+      string modPackageFolder = Path.Combine(RootModsFolder, modPackageName);
+
+      return _importAllOfThisTypeFromModFolder(modPackageFolder, options);
     }
 
     #endregion
@@ -421,22 +470,29 @@ namespace Meep.Tech.Data.IO {
 
       // get all mod packages:
       foreach (string modFolder in FilterOutInvalidFilenames(Directory.GetDirectories(RootModsFolder))) {
-        // get sub folders for each of them:
-        foreach((string folder, ArchetypePorter porter) in Directory.GetDirectories(modFolder)
-          .Where(f => Universe.GetModData().PortersByArchetypeSubfolder.ContainsKey(Path.GetDirectoryName(f)))
-          .Select(f => (folder: f, porter: Universe.GetModData().PortersByArchetypeSubfolder[Path.GetDirectoryName(f)]))
-        ) {
-          IEnumerable<TArchetype> typesFromFolder = ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
-           FilterOutInvalidFilenames(Directory.GetFiles(modFolder).Concat(Directory.GetDirectories(modFolder).ToHashSet())),
-           options,
-           out _
-          );
-
-          builtTypes.AddRange(typesFromFolder);
-        }
+        builtTypes.AddRange(_importAllOfThisTypeFromModFolder(modFolder, options));
       }
 
       return builtTypes;
+    }
+
+    IEnumerable<TArchetype> _importAllOfThisTypeFromModFolder(string modFolder, Dictionary<string, object> options) {
+      //List<TArchetype> builtTypes = new();
+      // get sub folders for each of them:
+      /*foreach ((string folder, ArchetypePorter porter) in Directory.GetDirectories(modFolder)
+        .Where(f => Universe.GetModData().PortersByArchetypeSubfolder.ContainsKey(Path.GetDirectoryName(f)))
+        .Select(f => (folder: f, porter: Universe.GetModData().PortersByArchetypeSubfolder[Path.GetDirectoryName(f)]))
+      ) {*/
+        /*IEnumerable<TArchetype> typesFromFolder =*/return ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
+         GetValidFlatFilesAndDirectoriesFromDirectory(modFolder),
+         options,
+         out _
+        );
+
+        //builtTypes.AddRange(typesFromFolder);
+      //}
+
+      //return builtTypes;
     }
 
     /// <summary>
@@ -458,7 +514,7 @@ namespace Meep.Tech.Data.IO {
           .Select(f => (folder: f, porter: Universe.GetModData().PortersByArchetypeSubfolder[Path.GetDirectoryName(f)]))
         ) {
           IEnumerable<TArchetype> typesFromFolder = ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
-           FilterOutInvalidFilenames(Directory.GetFiles(folder).Concat(Directory.GetDirectories(folder).ToHashSet())),
+           GetValidFlatFilesAndDirectoriesFromDirectory(folder),
            options,
            out HashSet<string> proccessedFiles
           );
@@ -474,7 +530,7 @@ namespace Meep.Tech.Data.IO {
           .Select(f => (folder: f, porter: Universe.GetModData().PortersByArchetypeSubfolder[Path.GetDirectoryName(f)]))
         ) {
         IEnumerable<TArchetype> typesFromFolder = ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
-         FilterOutInvalidFilenames(Directory.GetFiles(folder).Concat(Directory.GetDirectories(folder).ToHashSet())),
+         GetValidFlatFilesAndDirectoriesFromDirectory(folder),
          options,
          out HashSet<string> proccessedFiles
         );
@@ -526,7 +582,7 @@ namespace Meep.Tech.Data.IO {
       List<string> allProcessedFiles = new();
 
       // for each file that doesn't start with `.`, or doesn't start with `_` and isn't named config.json.
-      foreach (string providedItem in FilterOutInvalidFilenames(externalFileAndFolderLocations)) {
+      foreach (string providedItem in FilterOutInvalidFilenames(externalFileAndFolderLocations).Select(f => Path.GetFullPath(f))) {
         FileAttributes attr = File.GetAttributes(providedItem);
 
         if (attr.HasFlag(FileAttributes.Directory)) {
@@ -545,7 +601,8 @@ namespace Meep.Tech.Data.IO {
       archetypeDirectories.Sort(_byNameThenByFolder());
 
       // collect any untouched assets for importing at the end.
-      List<string> assetsToTryToBuildLooselyFrom = assetFiles.ToList();
+      List<string> assetsToTryToBuildLooselyFrom = assetFiles
+        .Select(f => Path.GetFullPath(f)).ToList();
 
       /// first, try to build all the configs.
       while (configFiles.Any()) {
@@ -557,10 +614,10 @@ namespace Meep.Tech.Data.IO {
         assets.Sort((x, y) => {
           string xDirectory = Path.GetDirectoryName(x);
           string yDirectory = Path.GetDirectoryName(y);
-          if (yDirectory == currentConfigDirectory) {
+          if (yDirectory == currentConfigDirectory && xDirectory != currentConfigDirectory) {
             return 1;
           }
-          else if (xDirectory == currentConfigDirectory) {
+          else if (xDirectory == currentConfigDirectory && yDirectory != currentConfigDirectory) {
             return -1;
           }
           else
@@ -581,6 +638,7 @@ namespace Meep.Tech.Data.IO {
         // remove proccessed files:
         configFiles.RemoveAt(0);
         if (processedFiles is not null) {
+          proccessedFiles = processedFiles.Select(f => Path.GetFullPath(f)).ToHashSet();
           assetsToTryToBuildLooselyFrom = assetsToTryToBuildLooselyFrom.Except(processedFiles).ToList();
           configFiles = configFiles.Except(processedFiles).ToList();
 
@@ -588,35 +646,53 @@ namespace Meep.Tech.Data.IO {
         }
       }
 
-      // import directories:
-      while (archetypeDirectories.Any()) {
-        string currentDirectory = archetypeDirectories.First();
-        List<string> folderFiles = FilterOutInvalidFilenames(Directory.GetFiles(currentDirectory))
-          .ToList();
-        folderFiles.Sort(_byNameThenByFolder());
+      /// import directories:
+      if (archetypeDirectories.Any()) {
 
-        IEnumerable<TArchetype> assetResourceArchetypes =
-          BuildAllArchetypesFromSingleArchetypeFolder(
-            currentDirectory,
-            folderFiles,
-            options,
-            out var processedFiles
-          );
+        // modify options for directory style import:
+        bool? currentSingleArchFolderOption
+          = options.TryGetValue(FromSingleArchetypeFolderImportOptionsKey, out var existingOptionValue)
+            ? (bool)existingOptionValue
+            : null;
+        options[FromSingleArchetypeFolderImportOptionsKey] = true;
 
-        if (assetResourceArchetypes.Any()) {
-          _updateModData(assetResourceArchetypes.First().PackageKey, assetResourceArchetypes.First().ResourceKey, assetResourceArchetypes);
+        // import all directories
+        while (archetypeDirectories.Any()) {
+          string currentDirectory = archetypeDirectories.First();
+          List<string> folderFiles = FilterOutInvalidFilenames(Directory.GetFiles(currentDirectory))
+            .ToList();
+          folderFiles.Sort(_byNameThenByFolder());
+
+          IEnumerable<TArchetype> assetResourceArchetypes =
+            BuildAllArchetypesFromSingleArchetypeFolder(
+              currentDirectory,
+              folderFiles,
+              options,
+              out var processedFiles
+            );
+
+          if (assetResourceArchetypes.Any()) {
+            _updateModData(assetResourceArchetypes.First().PackageKey, assetResourceArchetypes.First().ResourceKey, assetResourceArchetypes);
+          }
+
+          builtTypes.AddRange(assetResourceArchetypes);
+
+          // remove proccessed files:
+          archetypeDirectories.RemoveAt(0);
+          if (processedFiles is not null) {
+            proccessedFiles = processedFiles.Select(f => Path.GetFullPath(f)).ToHashSet();
+            assetsToTryToBuildLooselyFrom = assetsToTryToBuildLooselyFrom.Except(processedFiles).ToList();
+            configFiles = configFiles.Except(processedFiles).ToList();
+
+            allProcessedFiles.AddRange(processedFiles);
+          }
         }
 
-        builtTypes.AddRange(assetResourceArchetypes);
-
-        // remove proccessed files:
-        archetypeDirectories.RemoveAt(0);
-        if (processedFiles is not null) {
-          assetsToTryToBuildLooselyFrom = assetsToTryToBuildLooselyFrom.Except(processedFiles).ToList();
-          configFiles = configFiles.Except(processedFiles).ToList();
-
-          allProcessedFiles.AddRange(processedFiles);
+        // reset import options
+        if (currentSingleArchFolderOption is not null) {
+          options[FromSingleArchetypeFolderImportOptionsKey] = currentSingleArchFolderOption;
         }
+        else options.Remove(FromSingleArchetypeFolderImportOptionsKey);
       }
 
       assetsToTryToBuildLooselyFrom.Sort(_byNameThenByFolder());
@@ -640,6 +716,7 @@ namespace Meep.Tech.Data.IO {
         // remove proccessed files:
         assetsToTryToBuildLooselyFrom.RemoveAt(0);
         if (processedFiles is not null) {
+          proccessedFiles = processedFiles.Select(f => Path.GetFullPath(f)).ToHashSet();
           assetsToTryToBuildLooselyFrom = assetsToTryToBuildLooselyFrom.Except(processedFiles).ToList();
 
           allProcessedFiles.AddRange(processedFiles);

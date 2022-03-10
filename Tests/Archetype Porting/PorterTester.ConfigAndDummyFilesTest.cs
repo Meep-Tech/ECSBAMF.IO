@@ -56,7 +56,10 @@ namespace Meep.Tech.Data.IO.Tests {
           /// copy the file to where we need from the porter's known dummy files.
           string fileName = Path.GetFileName(dummyFileLocation);
           if (testRunner.TryToGetDummyFile(fileName, out string dummyFileSource)) {
-            string createdDummyFile = Path.Combine(_testRoot, dummyFileLocation);
+            string createdDummyFile = Path.GetFullPath(Path.Combine(_testRoot, dummyFileLocation));
+            if (!Directory.Exists(createdDummyFile)) {
+              Directory.CreateDirectory(Path.GetDirectoryName(createdDummyFile));
+            }
             File.Copy(dummyFileSource, createdDummyFile);
             createdDummyFiles.Add(createdDummyFile);
             potentialConfigPlaceholderFiles?.Remove(dummyFileLocation);
@@ -74,14 +77,19 @@ namespace Meep.Tech.Data.IO.Tests {
             dummyConfigFileLocation 
               = Path.Combine(_testRoot, ArchetypePorter.DefaultConfigFileName);
 
-          File.WriteAllText(dummyConfigFileLocation, _config.ToString());
+          File.WriteAllText(
+            (dummyConfigFileLocation = dummyConfigFileLocation.StartsWith('.') 
+              ? Path.GetFullPath(Path.Combine(_testRoot, dummyConfigFileLocation)) 
+              : dummyConfigFileLocation),
+            _config.ToString()
+          );
           createdDummyFiles.Add(dummyConfigFileLocation);
         }
       }
 
       protected override TestResult RunTest(PorterTester<TArchetype> testRunner) {
         _createdArchetypes = testRunner.Porter.ImportAndBuildNewArchetypesFromLooseFilesAndFolders(
-          ArchetypePorter.FilterOutInvalidFilenames(Directory.GetFiles(_testRoot)).ToArray(),
+          ArchetypePorter.GetValidFlatFilesAndDirectoriesFromDirectory(_testRoot),
           _options,
           out HashSet<string> processedFiles
         );
