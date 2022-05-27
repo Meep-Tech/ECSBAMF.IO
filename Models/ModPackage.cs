@@ -1,4 +1,5 @@
 ﻿using Meep.Tech.Collections.Generic;
+using Meep.Tech.Data.Utility;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,6 +20,22 @@ namespace Meep.Tech.Data.IO {
     }
 
     /// <summary>
+    /// All imported archetypes in this mod
+    /// </summary>
+    public IEnumerable<IPortableArchetype> ImportedArchetypes
+      => _importedArchetypesByResourceKey
+        .Values
+        .SelectMany(e => e.Values)
+        .SelectMany(Comparitors.Identity);
+
+    /// <summary>
+    /// The number of imported archetypes
+    /// Uses selectmany, sum, and count.
+    /// </summary>
+    public int ImportedArchetypesCount
+      => _importedArchetypesByResourceKey.Values.SelectMany(x => x.Values).Sum(x => x.Count());
+
+    /// <summary>
     /// The archetypes imported by this mod package, indexed by the resource key used to import them.
     /// This value is cached and re-updated on the first call after a mod item is added or removed from this package.
     /// </summary>
@@ -27,7 +44,7 @@ namespace Meep.Tech.Data.IO {
       .ToDictionary(e => e.Key, e => (IReadOnlyDictionary<string, IPortableArchetype>)e.Value.ToDictionary(
         e_e => e_e.Key,
         e_e => e_e.Value
-      )); readonly Dictionary<System.Type, Dictionary<string, IEnumerable<IPortableArchetype>>> _importedArchetypesByResourceKey
+      )); readonly Dictionary<System.Type, Dictionary<string, HashSet<IPortableArchetype>>> _importedArchetypesByResourceKey
         = new();
     IReadOnlyDictionary<System.Type, IReadOnlyDictionary<string, IEnumerable<IPortableArchetype>>> __importedArchetypesByResourceKey;
 
@@ -112,10 +129,18 @@ namespace Meep.Tech.Data.IO {
 
     internal void _addModAsset(System.Type archetypeBaseType, string resourceKey, IEnumerable<IPortableArchetype> assetArchetypes) {
       if (_importedArchetypesByResourceKey.TryGetValue(archetypeBaseType, out var modItemsForArchetypeBaseType)) {
-        assetArchetypes.ForEach(a => modItemsForArchetypeBaseType.AppendToValueCollection(resourceKey, a));
+        assetArchetypes.ForEach(a => {
+          if (modItemsForArchetypeBaseType.TryGetValue(resourceKey, out var existingItemsForResourceKey)) {
+            if (!existingItemsForResourceKey.Add(a)) {
+              throw new ArgumentException($"Archetype: {a} has already been added to the modpack: {Key}");
+            }
+          } else {
+            modItemsForArchetypeBaseType[resourceKey] = new HashSet<IPortableArchetype> { a };
+          }
+        });
       } else {
         _importedArchetypesByResourceKey.Add(archetypeBaseType, new() {
-          {resourceKey, assetArchetypes}
+          {resourceKey, assetArchetypes.ToHashSet()}
         });
       }
 

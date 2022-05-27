@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Meep.Tech.Collections.Generic;
+using Meep.Tech.Data.Reflection;
 
 namespace Meep.Tech.Data.IO {
 
@@ -19,6 +20,12 @@ namespace Meep.Tech.Data.IO {
       = "mods";
 
     /// <summary>
+    /// The default folder to save model data to
+    /// </summary>
+    public const string DataFolderName
+      = "data";
+
+    /// <summary>
     /// The root mod folder.
     /// </summary>
     public string RootModsFolder {
@@ -26,17 +33,38 @@ namespace Meep.Tech.Data.IO {
     }
 
     /// <summary>
-    /// The porters.
+    /// The root data folder.
     /// </summary>
-    public IReadOnlyDictionary<System.Type, ArchetypePorter> Porters
-      => _porters; readonly Dictionary<System.Type, ArchetypePorter> _porters
+    public string RootDataFolder {
+      get;
+    }
+
+    /// <summary>
+    /// The porters for archetypes.
+    /// </summary>
+    public IReadOnlyDictionary<System.Type, ArchetypePorter> ArchetypePorters
+      => _archetypePorters; readonly Dictionary<System.Type, ArchetypePorter> _archetypePorters
+        = new();
+
+    /// <summary>
+    /// The porters for models.
+    /// </summary>
+    public IReadOnlyDictionary<System.Type, ModelPorter> ModelPorters
+      => _modelPorters; readonly Dictionary<System.Type, ModelPorter> _modelPorters
         = new();
 
     /// <summary>
     /// The porters.
     /// </summary>
     public IReadOnlyDictionary<string, ArchetypePorter> PortersByArchetypeSubfolder
-      => _portersBySubFolder; readonly Dictionary<string, ArchetypePorter> _portersBySubFolder
+      => _portersByArchetypeSubFolder; readonly Dictionary<string, ArchetypePorter> _portersByArchetypeSubFolder
+        = new();
+
+    /// <summary>
+    /// The porters.
+    /// </summary>
+    public IReadOnlyDictionary<string, ModelPorter> PortersByModelSubfolder
+      => _portersByModelSubFolder; Dictionary<string, ModelPorter> _portersByModelSubFolder
         = new();
 
     /// <summary>
@@ -49,21 +77,39 @@ namespace Meep.Tech.Data.IO {
     /// <summary>
     /// The universe for this context.
     /// </summary>
-    public Universe Universe { 
+    public Universe Universe {
       get;
     }
 
     /// <summary>
     /// Make new mod porter settings to add to a universe.
     /// </summary>
-    /// <param name="rootApplicationPersistentDataFolder">The directory to put the mods folder inside of</param>
-    /// <param name="porters"></param>
-    public ModPorterContext(Universe universe, string rootApplicationPersistentDataFolder, IEnumerable<ArchetypePorter> porters) {
+    /// <param name="rootApplicationPersistentDataFolder">The directory to put the mods and data folders inside of</param>
+    public ModPorterContext(Universe universe, string rootApplicationPersistentDataFolder, IEnumerable<ArchetypePorter> archetypePorters, IEnumerable<ModelPorter> modelPorters) {
       Universe = universe;
       RootModsFolder = Path.Combine(rootApplicationPersistentDataFolder, ModFolderName);
-      porters.ForEach(p => p._universe = universe);
-      _porters = porters.ToDictionary(p => p.ArchetypeBaseType);
-      _portersBySubFolder = porters.ToDictionary(p => p.SubFolderName);
+      RootDataFolder = Path.Combine(rootApplicationPersistentDataFolder, DataFolderName);
+
+      archetypePorters.ForEach(p => p._universe = universe);
+      _archetypePorters = archetypePorters.ToDictionary(p => p.ArchetypeBaseType);
+      _portersByArchetypeSubFolder = archetypePorters.ToDictionary(p => p.SubFolderName);
+
+      modelPorters.ForEach(p => p.Universe = universe);
+      _modelPorters = modelPorters.ToDictionary(p => p.ModelBaseType);
+    }
+
+    ///<summary><inheritdoc/></summary>
+    protected override void OnLoaderFinalize() {
+      _portersByModelSubFolder = _modelPorters.Values.ToDictionary(p => p.GetSaveToRootFolder());
+    }
+
+    ///<summary><inheritdoc/></summary>
+    protected override void OnUnload(Archetype archetype) {
+      // remove from mod assets.
+      if (archetype is IPortableArchetype portableType) {
+        GetModPackage(portableType.PackageKey)
+          ._removeModAsset(portableType);
+      }
     }
 
     #region Get Porters
@@ -71,31 +117,122 @@ namespace Meep.Tech.Data.IO {
     /// <summary>
     /// Get the desired porter.
     /// </summary>
-    public ArchetypePorter<TArchetype> GetPorterFor<TArchetype>()
+    public ArchetypePorter<TArchetype> GetArchetypePorter<TArchetype>()
       where TArchetype : Archetype, IPortableArchetype
-        => (ArchetypePorter<TArchetype>)(_porters.TryGetValue(typeof(TArchetype), out var found)
+        => (ArchetypePorter<TArchetype>)(_archetypePorters.TryGetValue(typeof(TArchetype), out var found)
           ? found
-          : _porters.First(porter => porter.Value.ArchetypeBaseType.IsAssignableFrom(typeof(TArchetype))).Value);
+          : (_archetypePorters[typeof(TArchetype)] = _archetypePorters
+            .OrderByDescending(porter => porter.Key.GetDepthOfInheritance())
+            .First(porter => porter.Value.ArchetypeBaseType.IsAssignableFrom(typeof(TArchetype))).Value));
 
     /// <summary>
     /// Try to get the desired porter.
     /// Null on none found.
     /// </summary>
-    public ArchetypePorter<TArchetype> TryToGetPorterFor<TArchetype>()
+    public ArchetypePorter<TArchetype> TryToGetArchetypePorter<TArchetype>()
       where TArchetype : Archetype, IPortableArchetype
-        => (ArchetypePorter<TArchetype>)(_porters.TryGetValue(typeof(TArchetype), out var found)
-          ? found
-          : _porters.FirstOrDefault(porter => porter.Value.ArchetypeBaseType.IsAssignableFrom(typeof(TArchetype))).Value);
+        => TryToGetPorterFor<TArchetype>(out var porter)
+          ? porter
+          : null;
 
     /// <summary>
     /// Try to get the desired porter.
     /// Null on none found.
     /// </summary>
     public bool TryToGetPorterFor<TArchetype>(out ArchetypePorter<TArchetype> porter)
-      where TArchetype : Archetype, IPortableArchetype
-        => (porter = (ArchetypePorter<TArchetype>)(_porters.TryGetValue(typeof(TArchetype), out var found)
+      where TArchetype : Archetype, IPortableArchetype {
+      if (_archetypePorters.TryGetValue(typeof(TArchetype), out var found)) {
+        porter = (ArchetypePorter<TArchetype>)found;
+        return true;
+      }
+
+      porter = (ArchetypePorter<TArchetype>)_archetypePorters
+        .OrderByDescending(porter => porter.Key.GetDepthOfInheritance())
+        .FirstOrDefault(porter => porter.Value.ArchetypeBaseType.IsAssignableFrom(typeof(TArchetype))).Value;
+
+      if (porter != null) {
+        _archetypePorters[typeof(TArchetype)]
+          = porter;
+      }
+
+      return porter != null;
+    }
+
+    /// <summary>
+    /// Get the desired porter.
+    /// </summary>
+    public ModelPorter<TModel> GetModelPorter<TModel>()
+      where TModel : IModel
+        => (ModelPorter<TModel>)(_modelPorters.TryGetValue(typeof(TModel), out var found)
           ? found
-          : _porters.FirstOrDefault(porter => porter.Value.ArchetypeBaseType.IsAssignableFrom(typeof(TArchetype))).Value)) != null;
+          : (_modelPorters[typeof(TModel)] = _modelPorters
+              .OrderByDescending(porter => porter.Key.GetDepthOfInheritance())
+              .First(porter => porter.Value.ModelBaseType.IsAssignableFrom(typeof(TModel))).Value));
+
+    /// <summary>
+    /// Try to get the desired porter.
+    /// Null on none found.
+    /// </summary>
+    public ModelPorter<TModel> TryToGetModelPorter<TModel>()
+      where TModel : IModel
+        => TryToGetPorterFor<TModel>(out var porter)
+          ? porter
+          : null;
+
+    /// <summary>
+    /// Try to get the desired porter.
+    /// Null on none found.
+    /// </summary>
+    public ModelPorter TryToGetModelPorter(System.Type modelType)
+      => TryToGetModelPorter(modelType, out var porter)
+        ? porter
+        : null;
+
+    /// <summary>
+    /// Try to get the desired porter.
+    /// Null on none found.
+    /// </summary>
+    public bool TryToGetModelPorter(System.Type modelType, out ModelPorter porter) {
+      if (_modelPorters.TryGetValue(modelType, out var found)) {
+        porter = found;
+        return true;
+      }
+
+      porter = _modelPorters
+        .OrderByDescending(porter => porter.Key.GetDepthOfInheritance())
+        .FirstOrDefault(porter => porter.Value.ModelBaseType.IsAssignableFrom(modelType)).Value;
+
+      if (porter != null) {
+        _modelPorters[modelType]
+          = porter;
+      }
+
+      return porter != null;
+    }
+
+    /// <summary>
+    /// Try to get the desired porter.
+    /// Null on none found.
+    /// </summary>
+    public bool TryToGetPorterFor<TModel>(out ModelPorter<TModel> porter)
+      where TModel : IModel 
+    {
+      if (_modelPorters.TryGetValue(typeof(TModel), out var found)) {
+        porter = (ModelPorter<TModel>)found;
+        return true;
+      }
+
+      porter = (ModelPorter<TModel>)_modelPorters
+        .OrderByDescending(porter => porter.Key.GetDepthOfInheritance())
+        .FirstOrDefault(porter => porter.Value.ModelBaseType.IsAssignableFrom(typeof(TModel))).Value;
+
+      if (porter != null) {
+        _modelPorters[typeof(TModel)]
+          = porter;
+      }
+
+      return porter != null;
+    }
 
     #endregion
 

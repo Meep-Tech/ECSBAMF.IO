@@ -55,6 +55,12 @@ namespace Meep.Tech.Data.IO {
       = "__unprocessed_imports";
 
     /// <summary>
+    /// The finished imports folder name.
+    /// </summary>
+    public const string PluginsSubFolderName
+      = "_plugins";
+
+    /// <summary>
     /// Option parameter to override the object name
     /// </summary>
     public const string NameOverrideSetting
@@ -127,8 +133,8 @@ namespace Meep.Tech.Data.IO {
     /// <summary>
     /// Helper to filter out invalid files for porters.
     /// </summary>
-    public static IEnumerable<string> FilterOutInvalidFilenames(IEnumerable<string> externalFileAndFolderLocations)
-      => externalFileAndFolderLocations.Where(f => !f.StartsWith(".") && (!f.StartsWith("_") || f == "_config.json"));
+    public static IEnumerable<string> FilterOutInvalidFilenames(IEnumerable<string> externalFileAndFolderLocations, bool allowSpecialConfig = true)
+      => externalFileAndFolderLocations.Where(f => !f.StartsWith(".") && (!f.StartsWith("_") || (allowSpecialConfig && f == "_config.json")));
 
     /// <summary>
     /// Helper function to get all the valid flat files and directory names that the importer uses.
