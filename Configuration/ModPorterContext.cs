@@ -85,7 +85,10 @@ namespace Meep.Tech.Data.IO {
     /// Make new mod porter settings to add to a universe.
     /// </summary>
     /// <param name="rootApplicationPersistentDataFolder">The directory to put the mods and data folders inside of</param>
-    public ModPorterContext(Universe universe, string rootApplicationPersistentDataFolder, IEnumerable<ArchetypePorter> archetypePorters, IEnumerable<ModelPorter> modelPorters) {
+    public ModPorterContext(Universe universe, string rootApplicationPersistentDataFolder, IEnumerable<ArchetypePorter> archetypePorters = null, IEnumerable<ModelPorter> modelPorters = null) {
+      archetypePorters ??= Enumerable.Empty<ArchetypePorter>();
+      modelPorters ??= Enumerable.Empty<ModelPorter>();
+
       Universe = universe;
       RootModsFolder = Path.Combine(rootApplicationPersistentDataFolder, ModFolderName);
       RootDataFolder = Path.Combine(rootApplicationPersistentDataFolder, DataFolderName);
