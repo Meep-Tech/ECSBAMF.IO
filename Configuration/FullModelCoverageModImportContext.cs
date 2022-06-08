@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using Meep.Tech.Data.Reflection;
 
 namespace Meep.Tech.Data.IO {
 
@@ -24,15 +25,16 @@ namespace Meep.Tech.Data.IO {
 
     ///<summary><inheritdoc/></summary>
     protected override void OnModelTypeRegistered(Type modelType, IModel defaultModel) {
-      if(!_porters.TryGetValue(modelType.GetModelBaseType(), out _)) {
+      Type modelBaseType = modelType.GetModelBaseType();
+      if (!_porters.TryGetValue(modelBaseType, out _) && modelBaseType.IsAssignableToGeneric(typeof(IHasPortableModel<>))) {
         ModelPorter porter;
 
         System.Type genericPorterType = typeof(ModelPorter<>)
-          .MakeGenericType(modelType.GetModelBaseType());
+          .MakeGenericType(modelBaseType);
 
-        porter = (ModelPorter)Activator.CreateInstance(genericPorterType);
+        porter = (ModelPorter)Activator.CreateInstance(genericPorterType, Universe);
 
-        _porters[modelType.GetModelBaseType()] = porter;
+        _porters[modelBaseType] = porter;
       }
     }
 
