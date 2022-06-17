@@ -24,9 +24,9 @@ namespace Meep.Tech.Data.IO {
     }
 
     ///<summary><inheritdoc/></summary>
-    protected override void OnModelTypeRegistered(Type modelType, IModel defaultModel) {
+    protected override void OnModelTypeWasRegistered(Type modelType, IModel defaultModel) {
       Type modelBaseType = modelType.GetModelBaseType();
-      if (!_porters.TryGetValue(modelBaseType, out _) && modelBaseType.IsAssignableToGeneric(typeof(IHasPortableModel<>))) {
+      if (!_porters.TryGetValue(modelBaseType, out _)) {
         ModelPorter porter;
 
         System.Type genericPorterType = typeof(ModelPorter<>)

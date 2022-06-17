@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 
 namespace Meep.Tech.Data.IO {
-
+  
   /// <summary>
   /// Used to in and export models.
   /// </summary>
@@ -63,7 +63,6 @@ namespace Meep.Tech.Data.IO {
   /// <summary>
   /// Used to in and export models
   /// </summary>
-  /// <typeparam name="TModel"></typeparam>
   public class ModelPorter<TModel> : ModelPorter where TModel : IModel {
 
     /// <summary>
@@ -79,11 +78,62 @@ namespace Meep.Tech.Data.IO {
       => typeof(TModel);
 
     /// <summary>
+    /// Get the root folder to save models of this type to.
+    /// ex: '_items'
+    /// </summary>
+    protected virtual string SaveDataRootFolderName { 
+      get; 
+    }
+
+    /// <summary>
+    /// Used to get the unique folder name to save a model to.
+    /// </summary>
+    protected virtual Func<TModel, string> GetSubFolderName {
+      get;
+    }
+
+    /// <summary>
+    /// Used to get the name of the unique config (data.json).
+    /// This file name is used as the display name in metadata lists.
+    /// </summary>
+    protected virtual Func<TModel, string> GetMainConfigFileName {
+      get;
+    }
+
+    /// <summary>
+    /// Used to get a metadata icon from a filename.
+    /// This runs on every file when skimming metadata from a folder.
+    /// </summary>
+    protected virtual Func<string, object> TryToGetMetadataIcon {
+      get;
+    }
+
+    /// <summary>
+    /// Can be overriden to save extra data file data.
+    /// </summary>
+    /// <returns>Returns the names of any files created/updated/saved to</returns>
+    protected virtual Func<string, TModel, IEnumerable<string>> OnSaveDataFiles { 
+      get; 
+    }
+
+    /// <summary>
     /// Make a new model porter of the given type.
     /// </summary>
     /// <param name="universe"></param>
-    public ModelPorter(Universe universe) {
+    public ModelPorter(
+      Universe universe,
+      string saveDataRootFolderNameForModelType,
+      Func<TModel, string> getSubFolderName,
+      Func<TModel, string> getMainConfigFileName,
+      Func<string, TModel, IEnumerable<string>> onSaveDataFiles = null,
+      Func<string, object> tryToGetMetadataIconFromFilenameLogic = null
+    ) {
       Universe = universe;
+      SaveDataRootFolderName = saveDataRootFolderNameForModelType;
+      GetSubFolderName = getSubFolderName;
+      GetMainConfigFileName = getMainConfigFileName;
+      OnSaveDataFiles = onSaveDataFiles;
+      TryToGetMetadataIcon = tryToGetMetadataIconFromFilenameLogic;
     }
 
     ///<summary>
@@ -131,7 +181,7 @@ namespace Meep.Tech.Data.IO {
           }
         }
         if (icon is null) {
-          icon = _getDefaultArchetype().TryToGetMetadataIcon(file);
+          icon = TryToGetMetadataIcon?.Invoke(file);
         }
       }
 
@@ -155,7 +205,7 @@ namespace Meep.Tech.Data.IO {
     ///<summary><inheritdoc/></summary>
     public override string GetSaveToRootFolder() => Path.Combine(
       Universe.GetModData().RootDataFolder,
-      _getDefaultArchetype().SaveDataRootFolderNameForModelType
+      SaveDataRootFolderName
     );
 
     /// <summary>
@@ -164,7 +214,7 @@ namespace Meep.Tech.Data.IO {
     /// <param name="model"></param>
     /// <returns></returns>
     public string GetSaveToFolder(TModel model)
-      => Path.Combine(GetSaveToRootFolder(), _getDefaultArchetype().GetSubFolderName(model));
+      => Path.Combine(GetSaveToRootFolder(), GetSubFolderName(model));
 
     /// <summary>
     /// Used to save a model to the data folder.
@@ -173,8 +223,7 @@ namespace Meep.Tech.Data.IO {
     /// <returns>The metadata for the saved model</returns>
     public ModelMetaData<TModel> Save(TModel model) {
       JObject data = model.ToJson();
-      IHasPortableModel<TModel> type = _getDefaultArchetype();
-      string name = type.GetMainConfigFileName(model);
+      string name = GetMainConfigFileName(model);
       string saveToFolder = GetSaveToFolder(model);
 
       // clear existing loose files in the save directory for this model:
@@ -189,7 +238,7 @@ namespace Meep.Tech.Data.IO {
       var metadata = MakeMetadata(name, saveToFolder, DateTime.Now);
 
       File.WriteAllText(metadata.MainDataFileLocation, data.ToString());
-      type.SaveExtraDataFiles(saveToFolder);
+      OnSaveDataFiles?.Invoke(saveToFolder, model);
 
       return metadata;
     }
@@ -198,11 +247,5 @@ namespace Meep.Tech.Data.IO {
       JObject json = JObject.Parse(File.ReadAllText(modelMainCofig));
       return IModel.FromJson(json, typeof(TModel));
     }
-
-    IHasPortableModel<TModel> _getDefaultArchetype()
-      => (Archetypes.DefaultUniverse.Archetypes.GetDefaultForModelOfType<TModel>()
-        as IHasPortableModel<TModel>) 
-          ?? throw new ArgumentException($"Archetype: {Archetypes.DefaultUniverse.Archetypes.GetDefaultForModelOfType<TModel>()?.ToString() ?? "ERROR-NODEFAULTARCHETYPEFOUD"}, " 
-            + $"which is the default for the model: {typeof(TModel).FullName}, does not inherit from: {typeof(IHasPortableModel<TModel>).FullName}, so it's model caot be ported.");
   }
 }

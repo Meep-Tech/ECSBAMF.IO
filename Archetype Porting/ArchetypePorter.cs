@@ -1,19 +1,17 @@
 ﻿using Meep.Tech.Collections.Generic;
-using Meep.Tech.Data.IO;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Reflection;
 
 namespace Meep.Tech.Data.IO {
 
-  /// <summary>
-  /// Base statics and accesability stuff for non generic ArchetypePorter access.
-  /// </summary>
-  public abstract class ArchetypePorter {
+	/// <summary>
+	/// Base statics and accesability stuff for non generic ArchetypePorter access.
+	/// </summary>
+	public abstract class ArchetypePorter {
 
     /// <summary>
     /// Key for the name value in the config

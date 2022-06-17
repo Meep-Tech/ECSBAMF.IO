@@ -3,7 +3,7 @@
 namespace Meep.Tech.Data.IO {
 
   /// <summary>
-  /// An archetype that can be ported to/from a mod folder.
+  /// A resource based archetype that can be ported to/from a mod folder without the need of plugins/asseblies.
   /// 
   /// These types also require a private ctor with signagure with params:
   /// <para>

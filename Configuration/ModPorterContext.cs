@@ -2,16 +2,15 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using Meep.Tech.Collections.Generic;
 using Meep.Tech.Data.Reflection;
 
 namespace Meep.Tech.Data.IO {
 
-  /// <summary>
-  /// Settings and data for mod porters.
-  /// </summary>
-  public class ModPorterContext : Universe.ExtraContext {
+	/// <summary>
+	/// Settings and data for mod porters.
+	/// </summary>
+	public class ModPorterContext : Universe.ExtraContext {
 
     /// <summary>
     /// The base mod folder name
@@ -26,14 +25,14 @@ namespace Meep.Tech.Data.IO {
       = "data";
 
     /// <summary>
-    /// The root mod folder.
+    /// The root mod folder, where mods are loaded from.
     /// </summary>
     public string RootModsFolder {
       get;
     }
 
     /// <summary>
-    /// The root data folder.
+    /// The root data folder, where in game models are saved to
     /// </summary>
     public string RootDataFolder {
       get;
@@ -86,6 +85,7 @@ namespace Meep.Tech.Data.IO {
     /// </summary>
     /// <param name="rootApplicationPersistentDataFolder">The directory to put the mods and data folders inside of</param>
     public ModPorterContext(Universe universe, string rootApplicationPersistentDataFolder, IEnumerable<ArchetypePorter> archetypePorters = null, IEnumerable<ModelPorter> modelPorters = null) {
+      universe.Loader.Options.DataFolderParentFolderLocation = rootApplicationPersistentDataFolder;
       archetypePorters ??= Enumerable.Empty<ArchetypePorter>();
       modelPorters ??= Enumerable.Empty<ModelPorter>();
 
@@ -112,6 +112,25 @@ namespace Meep.Tech.Data.IO {
       if (archetype is IPortableArchetype portableType) {
         GetModPackage(portableType.PackageKey)
           ._removeModAsset(portableType);
+      }
+    }
+
+    /// <summary>
+    /// Grab auto included porters from the provided interface.
+    /// </summary>
+    protected override void OnArchetypeWasInitialized(Type archetypeType, Archetype archetype) {
+      if (ModPackage._modPackagesByWaitingAssemblies.TryGetValue(archetypeType.Assembly.Location, out ModPackage package)) {
+        // TODO: here should maybe be where we try to import the assets for plugin archetypes.
+        package._importedPluginArchetypes.Add(archetype);
+			}
+
+      foreach(System.Type iHavePorterInterface in archetypeType.GetAllInheritedGenericTypes(typeof(IHavePortableModel<>))) {
+        var forModelType = iHavePorterInterface.GetGenericArguments().First();
+        if (!_modelPorters.ContainsKey(forModelType)) {
+          _modelPorters[forModelType] = (ModelPorter)iHavePorterInterface
+            .GetMethod("CreateModelPorter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            .Invoke(archetype, new object[0]);
+        }
       }
     }
 
@@ -285,61 +304,71 @@ namespace Meep.Tech.Data.IO {
     /// <summary>
     /// Get the archetypes for the given resource key and type.
     /// </summary>
-    public IEnumerable<IPortableArchetype> GetResources(Type assetArchetypeType, string resourceKey)
-      => GetModPackage(resourceKey).Get(assetArchetypeType, resourceKey);
+    public IEnumerable<IPortableArchetype> GetResourceBasedArchetypes(Type assetArchetypeType, string resourceKey)
+      => GetModPackage(resourceKey).GetResourceBasedArchetype(assetArchetypeType, resourceKey);
 
     /// <summary>
     /// Try to get the archetypes for the given resource key and type.
     /// Returns empty enumerable on failure to find.
     /// </summary>
-    public IEnumerable<IPortableArchetype> TryToGetResources(Type assetArchetypeType, string resourceKey)
-      => GetModPackage(resourceKey).TryToGet(assetArchetypeType, resourceKey);
+    public IEnumerable<IPortableArchetype> TryToGetResourceBasedArchetypes(Type assetArchetypeType, string resourceKey)
+      => GetModPackage(resourceKey).TryToGetResourceBasedArchetype(assetArchetypeType, resourceKey);
 
     /// <summary>
     /// Try to get the archetypes for the given resource key and type.
     /// provides an empty enumerable on failure to find.
     /// </summary>
-    public bool TryToGetResources(Type assetArchetypeType, string resourceKey, out IEnumerable<IPortableArchetype> foundArchetypes)
-      => GetModPackage(resourceKey).TryToGet(assetArchetypeType, resourceKey, out foundArchetypes);
+    public bool TryToGetResourceBasedArchetypes(Type assetArchetypeType, string resourceKey, out IEnumerable<IPortableArchetype> foundArchetypes)
+      => GetModPackage(resourceKey).TryToGetResourceBasedArchetype(assetArchetypeType, resourceKey, out foundArchetypes);
 
     /// <summary>
     /// Get the archetypes for the given resource key and type.
     /// </summary>
-    public IEnumerable<TArchetype> GetResources<TArchetype>(string resourceKey)
+    public IEnumerable<TArchetype> GetResourceBasedArchetypes<TArchetype>(string resourceKey)
       where TArchetype: Archetype, IPortableArchetype
-        => GetModPackage(resourceKey).Get<TArchetype>(resourceKey);
+        => GetModPackage(resourceKey).GetResourceBasedArchetype<TArchetype>(resourceKey);
 
     /// <summary>
     /// Try to get the archetypes for the given resource key and type.
     /// Returns empty enumerable on failure to find.
     /// </summary>
-    public IEnumerable<TArchetype> TryToGetResources<TArchetype>(string resourceKey)
+    public IEnumerable<TArchetype> TryToGetResourceBasedArchetypes<TArchetype>(string resourceKey)
       where TArchetype : Archetype, IPortableArchetype
-        => GetModPackage(resourceKey).TryToGet<TArchetype>(resourceKey);
+        => GetModPackage(resourceKey).TryToGetResourceBasedArchetype<TArchetype>(resourceKey);
 
     /// <summary>
     /// Try to get the archetypes for the given resource key and type.
     /// provides an empty enumerable on failure to find.
     /// </summary>
-    public bool TryToGetResources<TArchetype>(string resourceKey, out IEnumerable<TArchetype> foundArchetypes)
+    public bool TryToGetResourceBasedArchetypes<TArchetype>(string resourceKey, out IEnumerable<TArchetype> foundArchetypes)
       where TArchetype : Archetype, IPortableArchetype
-        => GetModPackage(resourceKey).TryToGet(resourceKey, out foundArchetypes);
+        => GetModPackage(resourceKey).TryToGetResourceBasedArchetype(resourceKey, out foundArchetypes);
 
     /// <summary>
     /// Try to find any archetypes with the given resource key, reguardless of their base type.
     /// Returns empty if none found.
     /// </summary>
-    public IEnumerable<IPortableArchetype> TryToGetResourcesOfUnknownType(string resourceKey)
-        => GetModPackage(resourceKey).TryToGetResourcesOfUnknownType(resourceKey);
+    public IEnumerable<IPortableArchetype> TryToGetResourceBasedArchetypesOfUnknownType(string resourceKey)
+        => GetModPackage(resourceKey).TryToGetResourceBasedArchetypeOfUnknownType(resourceKey);
 
     /// <summary>
     /// Try to find any archetypes with the given resource key, reguardless of their base type.
     /// provides empty if none found.
     /// </summary>
-    public bool TryToGetResourcesOfUnknownType(string resourceKey, out IEnumerable<IPortableArchetype> foundArchetypes)
-        => GetModPackage(resourceKey).TryToGetResourcesOfUnknownType(resourceKey, out foundArchetypes);
+    public bool TryToGetResourceBasedArchetypesOfUnknownType(string resourceKey, out IEnumerable<IPortableArchetype> foundArchetypes)
+        => GetModPackage(resourceKey).TryToGetResourceBasedArchetypeOfUnknownType(resourceKey, out foundArchetypes);
 
     #endregion
+
+    internal void _updateModPackageFromPlugin(
+      string packageKey,
+      string assemblyName
+    ) {
+      if (!_importedMods.TryGetValue(packageKey, out var existingMod)) {
+        existingMod = _importedMods[packageKey] = new ModPackage(packageKey);
+			}
+      existingMod._addAssemblyPlugin(assemblyName);
+    }
 
     internal void _startNewModPackage<TArchetype>(
       string packageKey,
@@ -368,19 +397,5 @@ namespace Meep.Tech.Data.IO {
     /// </summary>
     public static ModPackage GetModPackage(this Universe universe, string packageOrResourceKey)
       => universe.GetExtraContext<ModPorterContext>().GetModPackage(packageOrResourceKey);
-
-    /// <summary>
-    /// Get a mod package from this universe given the package or resource key.
-    /// </summary>
-    public static IEnumerable<IPortableArchetype> TryToGetModResources(this Universe universe, string resourceKey)
-      => universe.GetExtraContext<ModPorterContext>().TryToGetResourcesOfUnknownType(resourceKey);
-
-    /// <summary>
-    /// Get a mod package from this universe given the package or resource key.
-    /// </summary>
-    public static IEnumerable<IPortableArchetype> GetModResources<TArchetype>(this Universe universe, string resourceKey)
-      where TArchetype : Archetype, IPortableArchetype
-        => universe.GetExtraContext<ModPorterContext>().GetResources<TArchetype>(resourceKey);
-
   }
 }
