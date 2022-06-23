@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using Meep.Tech.Collections.Generic;
 using Meep.Tech.Data.Reflection;
+using Newtonsoft.Json.Serialization;
 
 namespace Meep.Tech.Data.IO {
 
@@ -134,6 +136,30 @@ namespace Meep.Tech.Data.IO {
       }
     }
 
+    /// <summary>
+    /// Add in the special converters logic
+    /// </summary>
+    /// <param name="memberInfo"></param>
+    /// <param name="defaultJsonProperty"></param>
+    /// <exception cref="InvalidOperationException"></exception>
+    protected override void OnModelJsonPropertyCreated(MemberInfo memberInfo, JsonProperty defaultJsonProperty) {
+      AutoPortAttribute attribute;
+      if ((attribute = memberInfo.GetCustomAttribute<AutoPortAttribute>()) != null) {
+        var itemType = memberInfo is FieldInfo f ? f.FieldType : memberInfo is PropertyInfo p ? p.PropertyType : null;
+        if (typeof(IUnique).IsAssignableFrom(itemType)) {
+          defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelJsonConverter(Universe);
+        }
+        else if (itemType.IsAssignableToGeneric(typeof(IDictionary<,>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().Last())) {
+          defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelsDictionaryJsonConverter(Universe);
+        }
+        else if (itemType.IsAssignableToGeneric(typeof(IEnumerable<>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().First())) {
+          defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelsCollectionJsonConverter(Universe);
+        }
+        else throw new InvalidOperationException($"{nameof(AutoPortAttribute)} only works on properties that inherit from IUnique, or IDictionary<string,IUnique>, or IEnumerable<IUnique>. {itemType.FullName} is an invalid type.");
+      }
+      base.OnModelJsonPropertyCreated(memberInfo, defaultJsonProperty);
+    }
+
     #region Get Porters
 
     /// <summary>
@@ -184,7 +210,7 @@ namespace Meep.Tech.Data.IO {
     /// Get the desired porter.
     /// </summary>
     public ModelPorter<TModel> GetModelPorter<TModel>()
-      where TModel : IModel
+      where TModel : class, IModel
         => (ModelPorter<TModel>)(_modelPorters.TryGetValue(typeof(TModel), out var found)
           ? found
           : (_modelPorters[typeof(TModel)] = _modelPorters
@@ -196,7 +222,7 @@ namespace Meep.Tech.Data.IO {
     /// Null on none found.
     /// </summary>
     public ModelPorter<TModel> TryToGetModelPorter<TModel>()
-      where TModel : IModel
+      where TModel : class, IModel
         => TryToGetPorterFor<TModel>(out var porter)
           ? porter
           : null;
@@ -209,6 +235,17 @@ namespace Meep.Tech.Data.IO {
       => TryToGetModelPorter(modelType, out var porter)
         ? porter
         : null;
+
+    /// <summary>
+    /// Try to get the desired porter.
+    /// Null on none found.
+    /// </summary>
+    public ModelPorter GetModelPorter(System.Type modelType) 
+      => _modelPorters.TryGetValue(modelType, out var found)
+        ? found
+        : (_modelPorters[modelType] = _modelPorters
+          .OrderByDescending(porter => porter.Key.GetDepthOfInheritance())
+          .First(porter => porter.Value.ModelBaseType.IsAssignableFrom(modelType)).Value);
 
     /// <summary>
     /// Try to get the desired porter.
@@ -237,7 +274,7 @@ namespace Meep.Tech.Data.IO {
     /// Null on none found.
     /// </summary>
     public bool TryToGetPorterFor<TModel>(out ModelPorter<TModel> porter)
-      where TModel : IModel 
+      where TModel : class, IModel 
     {
       if (_modelPorters.TryGetValue(typeof(TModel), out var found)) {
         porter = (ModelPorter<TModel>)found;

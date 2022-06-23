@@ -8,7 +8,7 @@ namespace Meep.Tech.Data.IO {
   /// <typeparam name="TModel"></typeparam>
   public interface IHavePortableModel<TModel> 
     : ITrait<IHavePortableModel<TModel>>
-    where TModel : IModel
+    where TModel : class, IModel
   {
 
     /// <summary>

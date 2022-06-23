@@ -7,7 +7,7 @@ using System.Linq;
 namespace Meep.Tech.Data.IO {
   
   /// <summary>
-  /// Used to in and export models.
+  /// Used to in and export models to the data folder, or to mod packages.
   /// </summary>
   public abstract class ModelPorter {
     
@@ -29,19 +29,19 @@ namespace Meep.Tech.Data.IO {
     /// <summary>
     /// Get the root folder to save to for models of this type.
     /// </summary>
-    public abstract string GetSaveToRootFolder();
+    public abstract string GetSaveToRootFolder(ModPackage modPackage = null);
 
     /// <summary>
     /// Try to load an item by key
     /// </summary>
-    public bool TryToLoadByKey(string key, out IModel model)
-      => (model = TryToLoadByKey(key)) != null;
+    public bool TryToLoadByKey(string key, out IModel model, ModPackage fromModPackage = null)
+      => (model = TryToLoadByKey(key, fromModPackage)) != null;
 
     /// <summary>
     /// Try to load an item by key
     /// </summary>
-    public IModel TryToLoadByKey(string key) {
-      var modelFolder = Path.Combine(GetSaveToRootFolder(), key);
+    public IModel TryToLoadByKey(string key, ModPackage fromModPackage = null) {
+      var modelFolder = Path.Combine(GetSaveToRootFolder(fromModPackage), key);
       var modelMainCofig = Directory.GetFiles(modelFolder)
         .Where(f => !f.StartsWith("_") || f.StartsWith("."))
         .OrderBy(f => f)
@@ -53,6 +53,18 @@ namespace Meep.Tech.Data.IO {
 
       return null;
     }
+    /// <summary>
+    /// load an item by key
+    /// </summary>
+    public IModel LoadByKey(string key, ModPackage fromModPackage = null) {
+      var modelFolder = Path.Combine(GetSaveToRootFolder(fromModPackage), key);
+      var modelMainCofig = Directory.GetFiles(modelFolder)
+        .Where(f => !f.StartsWith("_") || f.StartsWith("."))
+        .OrderBy(f => f)
+        .First(f => Path.GetExtension(f).ToLower() == ModelMetaData.MainDataFileExtension);
+
+      return _loadFromDataFile(modelMainCofig);
+    }
 
     /// <summary>
     /// Try to load an item by key
@@ -63,7 +75,7 @@ namespace Meep.Tech.Data.IO {
   /// <summary>
   /// Used to in and export models
   /// </summary>
-  public class ModelPorter<TModel> : ModelPorter where TModel : IModel {
+  public class ModelPorter<TModel> : ModelPorter where TModel : class, IModel {
 
     /// <summary>
     /// The instance of this model porter type from the default universe.
@@ -139,19 +151,27 @@ namespace Meep.Tech.Data.IO {
     ///<summary>
     /// Try to load a model by key
     /// </summary>
-    public new TModel TryToLoadByKey(string key) 
-      => (TModel)base.TryToLoadByKey(key);
+    public new TModel TryToLoadByKey(string key, ModPackage fromModPackage = null) {
+      if (typeof(ICached).IsAssignableFrom(typeof(TModel))) {
+        TModel existing;
+        if ((existing = ICached.TryToGetFromCache(key) as TModel) != null) {
+          return existing;
+        }
+      }
+
+      return (TModel)base.TryToLoadByKey(key, fromModPackage);
+    }
 
     ///<summary>
     /// Try to load a model by key
     /// </summary>
-    public bool TryToLoadByKey(string key, out TModel model) 
-      => (model = TryToLoadByKey(key)) != null;
+    public bool TryToLoadByKey(string key, out TModel model, ModPackage fromModPackage = null) 
+      => (model = TryToLoadByKey(key, fromModPackage)) != null;
 
     /// <summary>
     /// Get metadata for all saved items of the given model type.
     /// </summary>
-    public IEnumerable<ModelMetaData<TModel>> GetMetadataForAll() {
+    public IEnumerable<ModelMetaData<TModel>> GetMetadataForAll(ModPackage fromModPackage = null) {
       List<ModelMetaData<TModel>> metaDatas = new();
       foreach (string modelDataFolder in Directory.GetDirectories(GetSaveToRootFolder())) {
         var metaData =
@@ -162,6 +182,17 @@ namespace Meep.Tech.Data.IO {
       }
 
       return metaDatas;
+    }
+
+    /// <summary>
+    /// Get an item by key. This checks the cache first
+    /// </summary>
+    public new TModel LoadByKey(string key, ModPackage fromModPackage = null) {
+      if (typeof(ICached).IsAssignableFrom(typeof(TModel))) {
+        return (TModel)ICached.GetFromCache(key);
+      }
+
+      return (TModel)base.LoadByKey(key, fromModPackage);
     }
 
     /// <summary>
@@ -199,11 +230,11 @@ namespace Meep.Tech.Data.IO {
     /// <summary>
     /// Can be overriden to make a different kind of metadata.
     /// </summary>
-    protected virtual ModelMetaData<TModel> MakeMetadata(string name,string modelDataFolder, DateTime lastEditedFileData, object icon = null) 
+    protected virtual ModelMetaData<TModel> MakeMetadata(string name,string modelDataFolder, DateTime lastEditedFileData, object icon = null, ModPackage modPackage = null) 
       => new(name, modelDataFolder, lastEditedFileData, icon);
 
     ///<summary><inheritdoc/></summary>
-    public override string GetSaveToRootFolder() => Path.Combine(
+    public override string GetSaveToRootFolder(ModPackage modPackage = null) => Path.Combine(
       Universe.GetModData().RootDataFolder,
       SaveDataRootFolderName
     );
@@ -213,18 +244,19 @@ namespace Meep.Tech.Data.IO {
     /// </summary>
     /// <param name="model"></param>
     /// <returns></returns>
-    public string GetSaveToFolder(TModel model)
-      => Path.Combine(GetSaveToRootFolder(), GetSubFolderName(model));
+    public string GetSaveToFolder(TModel model, ModPackage modPackage = null)
+      => Path.Combine(GetSaveToRootFolder(modPackage), GetSubFolderName(model));
 
     /// <summary>
     /// Used to save a model to the data folder.
     /// This clears the folder and overwrites any existing data files. non critical Sub-directories are left ignored.
     /// </summary>
+    /// <param name="toModPackage">(optional) the mod package to save the item to, if it's for a mod and not just save data</param>
     /// <returns>The metadata for the saved model</returns>
-    public ModelMetaData<TModel> Save(TModel model) {
+    public ModelMetaData<TModel> Save(TModel model, ModPackage toModPackage = null) {
       JObject data = model.ToJson();
       string name = GetMainConfigFileName(model);
-      string saveToFolder = GetSaveToFolder(model);
+      string saveToFolder = GetSaveToFolder(model, toModPackage);
 
       // clear existing loose files in the save directory for this model:
       if (Directory.Exists(saveToFolder)) {
@@ -235,12 +267,21 @@ namespace Meep.Tech.Data.IO {
         Directory.CreateDirectory(saveToFolder);
       }
 
-      var metadata = MakeMetadata(name, saveToFolder, DateTime.Now);
+      var metadata = MakeMetadata(name, saveToFolder, DateTime.Now, toModPackage);
 
       File.WriteAllText(metadata.MainDataFileLocation, data.ToString());
       OnSaveDataFiles?.Invoke(saveToFolder, model);
 
       return metadata;
+    }
+
+    /// <summary>
+    /// Delete the data for the given model with the given id.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <param name="toModPackage"></param>
+    public void Delete(string id, ModPackage toModPackage = null) {
+      throw new NotImplementedException();
     }
 
     internal override IModel _loadFromDataFile(string modelMainCofig) {

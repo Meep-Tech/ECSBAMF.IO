@@ -44,7 +44,15 @@ namespace Meep.Tech.Data.IO {
     /// </summary>
     public static void AddAllModPluginAssemblies(this Universe universe, int indexOffset = 1) {
       int modIndex = indexOffset;
-      foreach (string modFolderLocation in Directory.GetDirectories(universe.GetModData().RootModsFolder)) {
+      IEnumerable<string> modFolders = Directory.GetDirectories(universe.GetModData().RootModsFolder)
+        .Where(
+          d => {
+            var p = new DirectoryInfo(d).Name;
+            return !p.StartsWith(".")
+              && !p.StartsWith("_");
+          });
+
+      foreach (string modFolderLocation in modFolders) {
 				string pluginsPath = Path.Combine(modFolderLocation, ArchetypePorter.PluginsSubFolderName);
         if (Directory.Exists(pluginsPath)) {
 					List<string> assemblies = Directory.GetFiles(
