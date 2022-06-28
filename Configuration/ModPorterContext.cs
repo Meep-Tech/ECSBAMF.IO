@@ -1,18 +1,18 @@
-﻿using System;
+﻿using Meep.Tech.Collections.Generic;
+using Meep.Tech.Data.Reflection;
+using Newtonsoft.Json.Serialization;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Meep.Tech.Collections.Generic;
-using Meep.Tech.Data.Reflection;
-using Newtonsoft.Json.Serialization;
 
 namespace Meep.Tech.Data.IO {
 
-	/// <summary>
-	/// Settings and data for mod porters.
-	/// </summary>
-	public class ModPorterContext : Universe.ExtraContext {
+  /// <summary>
+  /// Settings and data for mod porters.
+  /// </summary>
+  public class ModPorterContext : Universe.ExtraContext {
 
     /// <summary>
     /// The base mod folder name
@@ -103,62 +103,62 @@ namespace Meep.Tech.Data.IO {
       _modelPorters = modelPorters.ToDictionary(p => p.ModelBaseType);
     }
 
-    ///<summary><inheritdoc/></summary>
-    protected override void OnLoaderFinalize() {
-      _portersByModelSubFolder = _modelPorters.Values.ToDictionary(p => p.GetSaveToRootFolder());
-    }
+    ///<summary><inheritdoc/></summary> 
+    protected override Action OnLoaderFinalizeStart
+      => () => _portersByModelSubFolder = _modelPorters.Values.ToDictionary(p => p.GetSaveToRootFolder());
 
     ///<summary><inheritdoc/></summary>
-    protected override void OnUnload(Archetype archetype) {
+    protected override Action<Archetype> OnUnloadArchetype => archetype => {
       // remove from mod assets.
       if (archetype is IPortableArchetype portableType) {
         GetModPackage(portableType.PackageKey)
           ._removeModAsset(portableType);
       }
-    }
+    };
 
     /// <summary>
     /// Grab auto included porters from the provided interface.
     /// </summary>
-    protected override void OnArchetypeWasInitialized(Type archetypeType, Archetype archetype) {
-      if (ModPackage._modPackagesByWaitingAssemblies.TryGetValue(archetypeType.Assembly.Location, out ModPackage package)) {
-        // TODO: here should maybe be where we try to import the assets for plugin archetypes.
-        package._importedPluginArchetypes.Add(archetype);
-			}
+    protected override Action<bool, Type, Archetype, Exception, bool> OnLoaderArchetypeInitializationComplete
+      => (success, archetypeType, archetype, error, isSplayed) => {
+        if (success) {
+          if (ModPackage._modPackagesByWaitingAssemblies.TryGetValue(archetypeType.Assembly.Location, out ModPackage package)) {
+            // TODO: here should maybe be where we try to import the assets for plugin archetypes.
+            package._importedPluginArchetypes.Add(archetype);
+          }
 
-      foreach(System.Type iHavePorterInterface in archetypeType.GetAllInheritedGenericTypes(typeof(IHavePortableModel<>))) {
-        var forModelType = iHavePorterInterface.GetGenericArguments().First();
-        if (!_modelPorters.ContainsKey(forModelType)) {
-          _modelPorters[forModelType] = (ModelPorter)iHavePorterInterface
-            .GetMethod("CreateModelPorter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
-            .Invoke(archetype, new object[0]);
+          foreach (System.Type iHavePorterInterface in archetypeType.GetAllInheritedGenericTypes(typeof(IHavePortableModel<>))) {
+            var forModelType = iHavePorterInterface.GetGenericArguments().First();
+            if (!_modelPorters.ContainsKey(forModelType)) {
+              _modelPorters[forModelType] = (ModelPorter)iHavePorterInterface
+                .GetMethod("CreateModelPorter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                .Invoke(archetype, new object[0]);
+            }
+          }
         }
-      }
-    }
+      };
 
     /// <summary>
     /// Add in the special converters logic
     /// </summary>
-    /// <param name="memberInfo"></param>
-    /// <param name="defaultJsonProperty"></param>
-    /// <exception cref="InvalidOperationException"></exception>
-    protected override void OnModelJsonPropertyCreated(MemberInfo memberInfo, JsonProperty defaultJsonProperty) {
-      AutoPortAttribute attribute;
-      if ((attribute = memberInfo.GetCustomAttribute<AutoPortAttribute>()) != null) {
-        var itemType = memberInfo is FieldInfo f ? f.FieldType : memberInfo is PropertyInfo p ? p.PropertyType : null;
-        if (typeof(IUnique).IsAssignableFrom(itemType)) {
-          defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelJsonConverter(Universe);
+    protected override Action<MemberInfo, JsonProperty> OnLoaderModelJsonPropertyCreationComplete
+      => (MemberInfo memberInfo, JsonProperty defaultJsonProperty) => {
+        AutoPortAttribute attribute;
+        if ((attribute = memberInfo.GetCustomAttribute<AutoPortAttribute>()) != null) {
+          var itemType = memberInfo is FieldInfo f ? f.FieldType : memberInfo is PropertyInfo p ? p.PropertyType : null;
+          if (typeof(IUnique).IsAssignableFrom(itemType)) {
+            defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelJsonConverter(Universe);
+          }
+          else if (itemType.IsAssignableToGeneric(typeof(IDictionary<,>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().Last())) {
+            defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelsDictionaryJsonConverter(Universe);
+          }
+          else if (itemType.IsAssignableToGeneric(typeof(IEnumerable<>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().First())) {
+            defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelsCollectionJsonConverter(Universe);
+          }
+          else throw new InvalidOperationException($"{nameof(AutoPortAttribute)} only works on properties that inherit from IUnique, or IDictionary<string,IUnique>, or IEnumerable<IUnique>. {itemType.FullName} is an invalid type.");
         }
-        else if (itemType.IsAssignableToGeneric(typeof(IDictionary<,>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().Last())) {
-          defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelsDictionaryJsonConverter(Universe);
-        }
-        else if (itemType.IsAssignableToGeneric(typeof(IEnumerable<>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().First())) {
-          defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelsCollectionJsonConverter(Universe);
-        }
-        else throw new InvalidOperationException($"{nameof(AutoPortAttribute)} only works on properties that inherit from IUnique, or IDictionary<string,IUnique>, or IEnumerable<IUnique>. {itemType.FullName} is an invalid type.");
-      }
-      base.OnLoaderModelJsonPropertyCreationComplete(memberInfo, defaultJsonProperty);
-    }
+        base.OnLoaderModelJsonPropertyCreationComplete(memberInfo, defaultJsonProperty);
+      };
 
     #region Get Porters
 
@@ -240,7 +240,7 @@ namespace Meep.Tech.Data.IO {
     /// Try to get the desired porter.
     /// Null on none found.
     /// </summary>
-    public ModelPorter GetModelPorter(System.Type modelType) 
+    public ModelPorter GetModelPorter(System.Type modelType)
       => _modelPorters.TryGetValue(modelType, out var found)
         ? found
         : (_modelPorters[modelType] = _modelPorters
@@ -274,8 +274,7 @@ namespace Meep.Tech.Data.IO {
     /// Null on none found.
     /// </summary>
     public bool TryToGetPorterFor<TModel>(out ModelPorter<TModel> porter)
-      where TModel : class, IModel 
-    {
+      where TModel : class, IModel {
       if (_modelPorters.TryGetValue(typeof(TModel), out var found)) {
         porter = (ModelPorter<TModel>)found;
         return true;
@@ -362,7 +361,7 @@ namespace Meep.Tech.Data.IO {
     /// Get the archetypes for the given resource key and type.
     /// </summary>
     public IEnumerable<TArchetype> GetResourceBasedArchetypes<TArchetype>(string resourceKey)
-      where TArchetype: Archetype, IPortableArchetype
+      where TArchetype : Archetype, IPortableArchetype
         => GetModPackage(resourceKey).GetResourceBasedArchetype<TArchetype>(resourceKey);
 
     /// <summary>
@@ -403,7 +402,7 @@ namespace Meep.Tech.Data.IO {
     ) {
       if (!_importedMods.TryGetValue(packageKey, out var existingMod)) {
         existingMod = _importedMods[packageKey] = new ModPackage(packageKey);
-			}
+      }
       existingMod._addAssemblyPlugin(assemblyName);
     }
 
