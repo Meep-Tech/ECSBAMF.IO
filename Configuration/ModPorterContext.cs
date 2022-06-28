@@ -157,7 +157,7 @@ namespace Meep.Tech.Data.IO {
         }
         else throw new InvalidOperationException($"{nameof(AutoPortAttribute)} only works on properties that inherit from IUnique, or IDictionary<string,IUnique>, or IEnumerable<IUnique>. {itemType.FullName} is an invalid type.");
       }
-      base.OnModelJsonPropertyCreated(memberInfo, defaultJsonProperty);
+      base.OnLoaderModelJsonPropertyCreationComplete(memberInfo, defaultJsonProperty);
     }
 
     #region Get Porters

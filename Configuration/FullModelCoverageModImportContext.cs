@@ -12,7 +12,7 @@ namespace Meep.Tech.Data.IO {
   /// </summary>
   public class FullModelCoverageModImportContext : Universe.ExtraContext {
     ModPorterContext _baseModImportSettings;
-    Dictionary<System.Type, ModelPorter> _porters 
+    Dictionary<System.Type, ModelPorter> _porters
       = new();
 
     /// <summary>
@@ -24,7 +24,7 @@ namespace Meep.Tech.Data.IO {
     }
 
     ///<summary><inheritdoc/></summary>
-    protected override void OnModelTypeWasRegistered(Type modelType, IModel defaultModel) {
+    protected override Action<Type> OnLoaderModelFullRegistrationStart => (Type modelType) => {
       Type modelBaseType = modelType.GetModelBaseType();
       if (!_porters.TryGetValue(modelBaseType, out _)) {
         ModelPorter porter;
@@ -36,11 +36,10 @@ namespace Meep.Tech.Data.IO {
 
         _porters[modelBaseType] = porter;
       }
-    }
+    };
 
-    ///<summary><inheritdoc/></summary>
-    protected override void OnAllTypesInitializationComplete() {
-    string rootFolder = _baseModImportSettings.RootDataFolder;
+    protected override Action OnLoaderBuildAllTestModelsComplete => () => {
+      string rootFolder = _baseModImportSettings.RootDataFolder;
       // or possibly
       DirectoryInfo parentDir = Directory.GetParent(rootFolder.EndsWith("\\") ? rootFolder : string.Concat(rootFolder, "\\"));
 
@@ -55,6 +54,6 @@ namespace Meep.Tech.Data.IO {
       // clear memory
       _baseModImportSettings = null;
       _porters = null;
-    }
+    };
   }
 }

@@ -68,14 +68,14 @@ namespace Meep.Tech.Data.IO.Configuration {
   /// <summary>
   /// Used to convert collections of models to/from json using auto-porting
   /// </summary>
-  public class PortableModelsDictionaryJsonConverter : JsonConverter<IDictionary<string, IUnique>> {
+  public class PortableModelsDictionaryJsonConverter : JsonConverter<IReadOnlyDictionary<string, IUnique>> {
     public Universe Universe { get; }
 
     public PortableModelsDictionaryJsonConverter(Universe universe) {
       Universe = universe;
     }
 
-    public override IDictionary<string, IUnique> ReadJson(JsonReader reader, Type objectType, [AllowNull] IDictionary<string, IUnique> existingValue, bool hasExistingValue, JsonSerializer serializer) {
+    public override IReadOnlyDictionary<string, IUnique> ReadJson(JsonReader reader, Type objectType, [AllowNull] IReadOnlyDictionary<string, IUnique> existingValue, bool hasExistingValue, JsonSerializer serializer) {
       Dictionary<string, IUnique> models = new();
       foreach (var item in JArray.Load(reader)) {
         IUnique model = null;
@@ -94,7 +94,7 @@ namespace Meep.Tech.Data.IO.Configuration {
       return models;
     }
 
-    public override void WriteJson(JsonWriter writer, [AllowNull] IDictionary<string, IUnique> value, JsonSerializer serializer) {
+    public override void WriteJson(JsonWriter writer, [AllowNull] IReadOnlyDictionary<string, IUnique> value, JsonSerializer serializer) {
       writer.WriteStartArray();
       foreach (var item in value) {
         writer.WriteValue(item.Value.Id);
