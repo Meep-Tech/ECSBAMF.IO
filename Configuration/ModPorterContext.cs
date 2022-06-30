@@ -146,18 +146,26 @@ namespace Meep.Tech.Data.IO {
         AutoPortAttribute attribute;
         if ((attribute = memberInfo.GetCustomAttribute<AutoPortAttribute>()) != null) {
           var itemType = memberInfo is FieldInfo f ? f.FieldType : memberInfo is PropertyInfo p ? p.PropertyType : null;
-          if (typeof(IUnique).IsAssignableFrom(itemType)) {
-            defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelJsonConverter(Universe);
-          }
-          else if (itemType.IsAssignableToGeneric(typeof(IDictionary<,>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().Last())) {
-            defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelsDictionaryJsonConverter(Universe);
-          }
-          else if (itemType.IsAssignableToGeneric(typeof(IEnumerable<>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().First())) {
-            defaultJsonProperty.Converter = new Meep.Tech.Data.IO.Configuration.PortableModelsCollectionJsonConverter(Universe);
-          }
-          else throw new InvalidOperationException($"{nameof(AutoPortAttribute)} only works on properties that inherit from IUnique, or IDictionary<string,IUnique>, or IEnumerable<IUnique>. {itemType.FullName} is an invalid type.");
+          defaultJsonProperty.Converter = typeof(IUnique).IsAssignableFrom(itemType)
+            ? new Meep.Tech.Data.IO.Configuration.PortableModelJsonConverter(Universe)
+            : (itemType.IsAssignableToGeneric(typeof(IReadOnlyDictionary<,>)) 
+              && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().Last())
+              && (typeof(string) == itemType.GetGenericArguments().First())
+            ) ? attribute.PreserveKeys
+                ? (Newtonsoft.Json.JsonConverter)Activator.CreateInstance(
+                    typeof(Configuration.PortableModelsDictionaryWithKeysJsonConverter<>).MakeGenericType(itemType.GetGenericArguments().Last()),
+                    Universe)
+                : (Newtonsoft.Json.JsonConverter)Activator.CreateInstance(
+                    typeof(Configuration.PortableModelsDictionaryJsonConverter<>).MakeGenericType(itemType.GetGenericArguments().Last()),
+                    Universe)
+              : itemType.IsAssignableToGeneric(typeof(IEnumerable<>)) && typeof(IUnique).IsAssignableFrom(itemType.GetGenericArguments().First())
+                ? (Newtonsoft.Json.JsonConverter)Activator.CreateInstance(
+                  typeof(Configuration.PortableModelsCollectionJsonConverter<>).MakeGenericType(itemType.GetGenericArguments().First()),
+                  Universe)
+                : throw new InvalidOperationException($"{nameof(AutoPortAttribute)} only works on properties that inherit from IUnique, or IDictionary<string,IUnique>, or IEnumerable<IUnique>. {itemType.FullName} is an invalid type.");
+
+          defaultJsonProperty.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
         }
-        base.OnLoaderModelJsonPropertyCreationComplete(memberInfo, defaultJsonProperty);
       };
 
     #region Get Porters

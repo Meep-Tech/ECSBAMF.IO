@@ -6,5 +6,18 @@ namespace Meep.Tech.Data.IO {
   /// Indicates that when this field is deserialized (via json) it should try to load the models as a collection; first via the cache, then via porting if a string id was provided instead of a json object
   /// </summary>
   [AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
-  public class AutoPortAttribute : Attribute {}
+  public class AutoPortAttribute : Attribute {
+
+    /// <summary>
+    /// If true, and the value is a dictionary[string,Iunique]; 
+    /// this will save the value as an object, and set the keys for each id in the collection to whatever they are in the existing dictionary.
+    /// <para>
+    /// By default, this is false, and dictionaries will serialize to a collection of ids, and deserialize to a collection of IUnique models indexed by their id.
+    /// </para>
+    /// </summary>
+    public bool PreserveKeys {
+      get;
+      init;
+    } = false;
+  }
 }

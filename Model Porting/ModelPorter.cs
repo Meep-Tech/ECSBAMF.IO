@@ -70,6 +70,23 @@ namespace Meep.Tech.Data.IO {
     /// Try to load an item by key
     /// </summary>
     internal abstract IModel _loadFromDataFile(string modelMainCofig);
+
+    /// <summary>
+    /// Used to save a model to the data folder.
+    /// This clears the folder and overwrites any existing data files. non critical Sub-directories are left ignored.
+    /// </summary>
+    /// <param name="toModPackage">(optional) the mod package to save the item to, if it's for a mod and not just save data</param>
+    /// <returns>The metadata for the saved model</returns>
+    public abstract ModelMetaData Save(IModel model, ModPackage toModPackage = null);
+
+    /// <summary>
+    /// Delete the data for the given model with the given id.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <param name="toModPackage"></param>
+    public void Delete(string id, ModPackage toModPackage = null) {
+      throw new NotImplementedException();
+    }
   }
 
   /// <summary>
@@ -234,7 +251,7 @@ namespace Meep.Tech.Data.IO {
       => new(name, modelDataFolder, lastEditedFileData, icon);
 
     ///<summary><inheritdoc/></summary>
-    public override string GetSaveToRootFolder(ModPackage modPackage = null) => Path.Combine(
+    public sealed override string GetSaveToRootFolder(ModPackage modPackage = null) => Path.Combine(
       Universe.GetModData().RootDataFolder,
       SaveDataRootFolderName
     );
@@ -275,14 +292,9 @@ namespace Meep.Tech.Data.IO {
       return metadata;
     }
 
-    /// <summary>
-    /// Delete the data for the given model with the given id.
-    /// </summary>
-    /// <param name="id"></param>
-    /// <param name="toModPackage"></param>
-    public void Delete(string id, ModPackage toModPackage = null) {
-      throw new NotImplementedException();
-    }
+    ///<summary><inheritdoc/></summary>
+    public sealed override ModelMetaData Save(IModel model, ModPackage toModPackage = null)
+      => Save((TModel)model, toModPackage);
 
     internal override IModel _loadFromDataFile(string modelMainCofig) {
       JObject json = JObject.Parse(File.ReadAllText(modelMainCofig));

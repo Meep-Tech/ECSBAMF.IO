@@ -31,14 +31,14 @@ namespace Meep.Tech.Data.IO.Configuration {
     }
 
     public override void WriteJson(JsonWriter writer, [AllowNull] IModel value, JsonSerializer serializer) {
-      writer.WriteValue((value as IUnique).Id);
+      writer.WriteValue(((IUnique)value).Id);
     }
   }
 
   /// <summary>
   /// Used to convert collections of models to/from json using auto-porting
   /// </summary>
-  public class PortableModelsCollectionJsonConverter : JsonConverter<IEnumerable<IUnique>> {
+  public class PortableModelsCollectionJsonConverter<TModel> : JsonConverter<IEnumerable<TModel>> where TModel : IUnique {
     public Universe Universe { get; }
 
     public PortableModelsCollectionJsonConverter(Universe universe) {
@@ -46,17 +46,17 @@ namespace Meep.Tech.Data.IO.Configuration {
     }
 
 
-    public override IEnumerable<IUnique> ReadJson(JsonReader reader, Type objectType, [AllowNull] IEnumerable<IUnique> existingValue, bool hasExistingValue, JsonSerializer serializer) {
+    public override IEnumerable<TModel> ReadJson(JsonReader reader, Type objectType, [AllowNull] IEnumerable<TModel> existingValue, bool hasExistingValue, JsonSerializer serializer) {
       foreach (var item in JArray.Load(reader)) {
         if (item.Type == JTokenType.String) {
-          yield return (IUnique)IModel.FromJson(item as JObject, objectType, Universe);
+          yield return (TModel)Universe.GetModData().GetModelPorter(objectType).LoadByKey(item.Value<string>());
         } else if (item.Type == JTokenType.Object) {
-          yield return (IUnique)Universe.GetModData().GetModelPorter(objectType).LoadByKey(item.Value<string>());
+          yield return (TModel)IModel.FromJson(item as JObject, objectType, Universe);
         }
       }
     }
 
-    public override void WriteJson(JsonWriter writer, [AllowNull] IEnumerable<IUnique> value, JsonSerializer serializer) {
+    public override void WriteJson(JsonWriter writer, [AllowNull] IEnumerable<TModel> value, JsonSerializer serializer) {
       writer.WriteStartArray();
       foreach (var item in value) {
         writer.WriteValue(item.Id);
@@ -68,23 +68,62 @@ namespace Meep.Tech.Data.IO.Configuration {
   /// <summary>
   /// Used to convert collections of models to/from json using auto-porting
   /// </summary>
-  public class PortableModelsDictionaryJsonConverter : JsonConverter<IReadOnlyDictionary<string, IUnique>> {
+  public class PortableModelsDictionaryWithKeysJsonConverter<TModel> : JsonConverter<IReadOnlyDictionary<string, TModel>> where TModel : IUnique {
+    public Universe Universe { get; }
+
+    public PortableModelsDictionaryWithKeysJsonConverter(Universe universe) {
+      Universe = universe;
+    }
+
+    public override IReadOnlyDictionary<string, TModel> ReadJson(JsonReader reader, Type objectType, [AllowNull] IReadOnlyDictionary<string, TModel> existingValue, bool hasExistingValue, JsonSerializer serializer) {
+      Dictionary<string, TModel> models = new();
+      foreach (var item in JObject.Load(reader)) {
+        TModel model;
+        if (item.Value.Type == JTokenType.String) {
+          model = (TModel)Universe.GetModData().GetModelPorter(typeof(TModel)).LoadByKey(item.Value.Value<string>());
+        }
+        else if (item.Value.Type == JTokenType.Object) {
+          model = (TModel)IModel.FromJson(item.Value as JObject, typeof(TModel), Universe);
+        }
+        else throw new JsonException();
+
+        if (model is not null) {
+          models.Add(item.Key, model);
+        }
+      }
+
+      return models;
+    }
+
+    public override void WriteJson(JsonWriter writer, [AllowNull] IReadOnlyDictionary<string, TModel> value, JsonSerializer serializer) {
+      writer.WriteStartObject();
+      foreach (var item in value) {
+        writer.WritePropertyName(item.Key);
+        writer.WriteValue(item.Value.Id);
+      }
+      writer.WriteEndObject();
+    }
+  }
+
+  /// <summary>
+  /// Used to convert collections of models to/from json using auto-porting
+  /// </summary>
+  public class PortableModelsDictionaryJsonConverter<TModel> : JsonConverter<IReadOnlyDictionary<string, TModel>> where TModel : IUnique {
     public Universe Universe { get; }
 
     public PortableModelsDictionaryJsonConverter(Universe universe) {
       Universe = universe;
     }
 
-    public override IReadOnlyDictionary<string, IUnique> ReadJson(JsonReader reader, Type objectType, [AllowNull] IReadOnlyDictionary<string, IUnique> existingValue, bool hasExistingValue, JsonSerializer serializer) {
-      Dictionary<string, IUnique> models = new();
+    public override IReadOnlyDictionary<string, TModel> ReadJson(JsonReader reader, Type objectType, [AllowNull] IReadOnlyDictionary<string, TModel> existingValue, bool hasExistingValue, JsonSerializer serializer) {
+      Dictionary<string, TModel> models = new();
       foreach (var item in JArray.Load(reader)) {
-        IUnique model = null;
+        TModel model;
         if (item.Type == JTokenType.String) {
-          model = (IUnique)IModel.FromJson(item as JObject, objectType, Universe);
-        }
-        else if (item.Type == JTokenType.Object) {
-          model = (IUnique)Universe.GetModData().GetModelPorter(objectType).LoadByKey(item.Value<string>());
-        }
+          model = (TModel)Universe.GetModData().GetModelPorter(typeof(TModel)).LoadByKey(item.Value<string>());
+        } else if (item.Type == JTokenType.Object) {
+          model = (TModel)IModel.FromJson(item as JObject, typeof(TModel), Universe);
+        } else throw new JsonException();
 
         if (model is not null) {
           models.Add(model, m => m.Id);
@@ -94,7 +133,7 @@ namespace Meep.Tech.Data.IO.Configuration {
       return models;
     }
 
-    public override void WriteJson(JsonWriter writer, [AllowNull] IReadOnlyDictionary<string, IUnique> value, JsonSerializer serializer) {
+    public override void WriteJson(JsonWriter writer, [AllowNull] IReadOnlyDictionary<string, TModel> value, JsonSerializer serializer) {
       writer.WriteStartArray();
       foreach (var item in value) {
         writer.WriteValue(item.Value.Id);
