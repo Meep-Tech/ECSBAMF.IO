@@ -19,5 +19,14 @@ namespace Meep.Tech.Data.IO {
       get;
       init;
     } = false;
+
+    /// <summary>
+    /// If this is true, this will not try to auto port when auto-building.
+    /// This is false by default.
+    /// </summary>
+    public bool IgnoreDuringAutoBuilding {
+      get;
+      init;
+    } = false;
   }
 }

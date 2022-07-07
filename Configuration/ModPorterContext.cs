@@ -2,10 +2,12 @@
 using Meep.Tech.Data.Reflection;
 using Newtonsoft.Json.Serialization;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Serialization.Formatters;
 
 namespace Meep.Tech.Data.IO {
 
@@ -167,6 +169,203 @@ namespace Meep.Tech.Data.IO {
           defaultJsonProperty.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
         }
       };
+
+    static MethodInfo _stringGetter
+       = typeof(BuilderExtensions).GetMethod(nameof(BuilderExtensions.TryToGetParam))
+        .MakeGenericMethod(typeof(string));
+    static MethodInfo _stringEnumerableGetter
+       = typeof(BuilderExtensions).GetMethod(nameof(BuilderExtensions.TryToGetParam))
+        .MakeGenericMethod(typeof(IEnumerable<object>));
+    static MethodInfo _stringDictionaryGetter
+       = typeof(BuilderExtensions).GetMethod(nameof(BuilderExtensions.TryToGetParam))
+        .MakeGenericMethod(typeof(Dictionary<string, object>));
+    static MethodInfo _stringEnumerableBackupGetter
+       = typeof(BuilderExtensions).GetMethod(nameof(BuilderExtensions.TryToGetParam))
+        .MakeGenericMethod(typeof(IEnumerable<string>));
+    static MethodInfo _stringDictionaryBackupGetter
+       = typeof(BuilderExtensions).GetMethod(nameof(BuilderExtensions.TryToGetParam))
+        .MakeGenericMethod(typeof(Dictionary<string, string>));
+
+    /// <summary>
+    /// Adds auto porting steps for auto building.
+    /// </summary>
+    protected override Action<Type, AutoBuildAttribute, PropertyInfo> OnLoaderAutoBuildPropertyCreationStart
+      => (modelType, autoBuildData, fieldInfo) => {
+        AutoPortAttribute autoPortAttribute;
+        if ((autoPortAttribute = fieldInfo.GetCustomAttribute<AutoPortAttribute>(true)) != null) {
+
+          // check for skipping
+          if (autoPortAttribute.IgnoreDuringAutoBuilding) {
+            return;
+          }
+
+          // if not, these types get a custom getter
+          autoBuildData.Getter
+            = new((m,b,p,a,r) => {
+              MethodInfo getterFunc = p.PropertyType.IsAssignableToGeneric(typeof(IReadOnlyDictionary<,>))
+                ? _stringDictionaryGetter
+                : p.PropertyType.IsAssignableToGeneric(typeof(IEnumerable<>)) 
+                  ? _stringEnumerableGetter
+                  : _stringGetter;
+
+              return AutoBuildAttribute.BuildDefaultGetterFromBuilderOrDefault(m, b, p, a, (m, b, p, a, r) => {
+                object[] parameters = new object[] { b, a.ParameterName ?? p.Name, null, default };
+
+                if ((bool)getterFunc.Invoke(null, parameters)) {
+                  // if we succeeded in our get and it's a dictionary type field:
+                  if (getterFunc == _stringDictionaryGetter) {
+                    // if we need to preserve the keys
+                    if (autoPortAttribute.PreserveKeys) {
+                      return _getDictionaryWithPreservedKeysFromDictionary(fieldInfo, parameters);
+                    } // if the keys are just the item ids
+                    else {
+                      return _getDictionaryFromDictionary(fieldInfo, parameters);
+                    }
+                  } // if ifs for an enumerable type
+                  else if (getterFunc == _stringEnumerableGetter) {
+                    return _getForEnumerableFromEnumerable(fieldInfo, parameters);
+                  } // if we succeeded for a regular single model
+                  else {
+                    return parameters[2] is string id
+                        ? GetModelPorter(p.PropertyType).LoadByKey(id)
+                        : parameters[2];
+                  }
+                } // if we failed and it's a dictionary getter, try the backup
+                else if (getterFunc == _stringDictionaryGetter) {
+                  // if the backup succeeds
+                  if ((bool)_stringDictionaryBackupGetter.Invoke(null, parameters)) {
+                    // if we need to preserve the keys
+                    if (autoPortAttribute.PreserveKeys) {
+                      return _getDictionaryWithPreservedKeysFromDictionaryBackup(fieldInfo, parameters);
+                    } // if the keys are just the item ids
+                    else {
+                      return _getDictionaryFromDictionaryBackup(fieldInfo, parameters);
+                    }
+                  }
+
+                  // if we failed the backup but have preserve keys off, we can try to get and adapt an enumerable.
+                  if (!autoPortAttribute.PreserveKeys) {
+                    // backup to use IE<object> in place of ID<string, object>
+                    if (!(bool)_stringEnumerableGetter.Invoke(null, parameters)) {
+                      // backup for IE<string>
+                      if ((bool)_stringEnumerableBackupGetter.Invoke(null, parameters)) {
+                        return _getDictionaryFromEnumerableBackup(fieldInfo, parameters);
+                      }
+                    }
+                    else {
+                      return _getDictionaryFromEnumerable(fieldInfo, parameters);
+                    }
+                  }
+                }
+                else if (getterFunc == _stringEnumerableGetter) {
+                  if ((bool)_stringEnumerableBackupGetter.Invoke(null, parameters)) {
+                    return _getFromEnumerableBackup(fieldInfo, parameters);
+                  }
+                }
+
+                return !r
+                  ? AutoBuildAttribute.GetDefaultValue(m, b, p, a, r)
+                  : throw new IModel.Builder.Param.MissingException($"Missing param of type {p.PropertyType} or portable id for that type as a param with the name:{a.ParameterName ?? p.Name}");
+              });
+            });
+        }
+      };
+
+    object _getDictionaryFromDictionaryBackup(PropertyInfo fieldInfo, object[] parameters) {
+      Type modelToPortType = fieldInfo.DeclaringType.GenericTypeArguments[1];
+      IDictionary result = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), modelToPortType)) as IDictionary;
+      foreach (var entry in parameters[2] as Dictionary<string, string>) {
+        object value = GetModelPorter(modelToPortType).LoadByKey(entry.Value);
+        result.Add((value as IUnique).Id, value);
+      }
+
+      return result;
+    }
+
+    object _getDictionaryWithPreservedKeysFromDictionaryBackup(PropertyInfo fieldInfo, object[] parameters) {
+      Type modelToPortType = fieldInfo.DeclaringType.GenericTypeArguments[1];
+      IDictionary result = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), modelToPortType)) as IDictionary;
+      foreach (var entry in parameters[2] as Dictionary<string, string>) {
+        object value = GetModelPorter(modelToPortType).LoadByKey(entry.Value);
+        result.Add(entry.Key, value);
+      }
+
+      return result;
+    }
+
+    object _getDictionaryFromDictionary(PropertyInfo fieldInfo, object[] parameters) {
+      Type modelToPortType = fieldInfo.DeclaringType.GenericTypeArguments[1];
+      IDictionary result = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), modelToPortType)) as IDictionary;
+      foreach (var entry in parameters[2] as Dictionary<string, object>) {
+        object value = entry.Value is string
+          ? GetModelPorter(modelToPortType).LoadByKey(entry.Value as string)
+          : entry.Value;
+        result.Add((value as IUnique).Id, value);
+      }
+
+      return result;
+    }
+
+    object _getDictionaryWithPreservedKeysFromDictionary(PropertyInfo fieldInfo, object[] parameters) {
+      Type modelToPortType = fieldInfo.DeclaringType.GenericTypeArguments[1];
+      IDictionary result = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), modelToPortType)) as IDictionary;
+      foreach (var entry in parameters[2] as Dictionary<string, object>) {
+        object value = entry.Value is string
+          ? GetModelPorter(modelToPortType).LoadByKey(entry.Value as string)
+          : entry.Value;
+        result.Add(entry.Key, value);
+      }
+
+      return result;
+    }
+
+    object _getDictionaryFromEnumerableBackup(PropertyInfo fieldInfo, object[] parameters) {
+      Type modelToPortType = fieldInfo.DeclaringType.GenericTypeArguments[0];
+      IDictionary result = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), modelToPortType)) as IDictionary;
+      foreach (var entry in parameters[2] as IEnumerable<string>) {
+        object value = GetModelPorter(modelToPortType).LoadByKey(entry);
+        result.Add((value as IUnique).Id, value);
+      }
+
+      return result;
+    }
+
+    object _getDictionaryFromEnumerable(PropertyInfo fieldInfo, object[] parameters) {
+      Type modelToPortType = fieldInfo.DeclaringType.GenericTypeArguments[0];
+      IDictionary result = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), modelToPortType)) as IDictionary;
+      foreach (var entry in parameters[2] as IEnumerable<object>) {
+        object value = entry is string
+          ? GetModelPorter(modelToPortType).LoadByKey(entry as string)
+          : entry;
+        result.Add((entry as IUnique).Id, value);
+      }
+
+      return result;
+    }
+
+    object _getFromEnumerableBackup(PropertyInfo fieldInfo, object[] parameters) {
+      Type modelToPortType = fieldInfo.DeclaringType.GenericTypeArguments[0];
+      IList result = Activator.CreateInstance(typeof(List<>).MakeGenericType(modelToPortType)) as IList;
+      foreach (var entry in parameters[2] as IEnumerable<string>) {
+        object value = GetModelPorter(modelToPortType).LoadByKey(entry);
+        result.Add(value);
+      }
+
+      return result;
+    }
+
+    object _getForEnumerableFromEnumerable(PropertyInfo fieldInfo, object[] parameters) {
+      Type modelToPortType = fieldInfo.DeclaringType.GenericTypeArguments[0];
+      IList result = Activator.CreateInstance(typeof(List<>).MakeGenericType(modelToPortType)) as IList;
+      foreach (var entry in parameters[2] as IEnumerable<object>) {
+        object value = entry is string
+          ? GetModelPorter(modelToPortType).LoadByKey(entry as string)
+          : entry;
+        result.Add(value);
+      }
+
+      return result;
+    }
 
     #region Get Porters
 

@@ -138,6 +138,11 @@ namespace Meep.Tech.Data.IO {
     }
 
     /// <summary>
+    /// Used to get the middle of the folder path between the root save locaton and the sub folder.
+    /// </summary>
+    public Func<TModel, string> GetPreSubFolderPath { get; }
+
+    /// <summary>
     /// Can be overriden to save extra data file data.
     /// </summary>
     /// <returns>Returns the names of any files created/updated/saved to</returns>
@@ -155,7 +160,8 @@ namespace Meep.Tech.Data.IO {
       Func<TModel, string> getSubFolderName,
       Func<TModel, string> getMainConfigFileName,
       Func<string, TModel, IEnumerable<string>> onSaveDataFiles = null,
-      Func<string, object> tryToGetMetadataIconFromFilenameLogic = null
+      Func<string, object> tryToGetMetadataIconFromFilenameLogic = null,
+      Func<TModel, string> getPreSubFolderPath = null
     ) {
       Universe = universe;
       SaveDataRootFolderName = saveDataRootFolderNameForModelType;
@@ -163,6 +169,7 @@ namespace Meep.Tech.Data.IO {
       GetMainConfigFileName = getMainConfigFileName;
       OnSaveDataFiles = onSaveDataFiles;
       TryToGetMetadataIcon = tryToGetMetadataIconFromFilenameLogic;
+      GetPreSubFolderPath = getPreSubFolderPath;
     }
 
     ///<summary>
@@ -262,7 +269,9 @@ namespace Meep.Tech.Data.IO {
     /// <param name="model"></param>
     /// <returns></returns>
     public string GetSaveToFolder(TModel model, ModPackage modPackage = null)
-      => Path.Combine(GetSaveToRootFolder(modPackage), GetSubFolderName(model));
+      => GetPreSubFolderPath?.Invoke(model) is string preSubFolderPath
+        ? Path.Combine(GetSaveToRootFolder(modPackage), preSubFolderPath, GetSubFolderName(model))
+        : Path.Combine(GetSaveToRootFolder(modPackage), GetSubFolderName(model));
 
     /// <summary>
     /// Used to save a model to the data folder.
@@ -288,6 +297,9 @@ namespace Meep.Tech.Data.IO {
 
       File.WriteAllText(metadata.MainDataFileLocation, data.ToString());
       OnSaveDataFiles?.Invoke(saveToFolder, model);
+      if (model is IDoOnSave doer) {
+        doer.OnSave(data, metadata, saveToFolder, toModPackage);
+      }
 
       return metadata;
     }

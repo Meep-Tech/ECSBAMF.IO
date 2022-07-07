@@ -7,7 +7,8 @@ namespace Meep.Tech.Data.IO {
   /// </summary>
   /// <typeparam name="TModel"></typeparam>
   public interface IHavePortableModel<TModel> 
-    : ITrait<IHavePortableModel<TModel>>
+    : ITrait<IHavePortableModel<TModel>>,
+      IFactory
     where TModel : class, IModel
   {
 
@@ -15,7 +16,7 @@ namespace Meep.Tech.Data.IO {
     /// Used to create a model impoerter for the given type.
     /// </summary>
     /// <returns></returns>
-    ModelPorter<TModel> CreateModelPorter();
+    protected internal ModelPorter<TModel> CreateModelPorter();
 
     string ITrait<IHavePortableModel<TModel>>.TraitName
       => $"Has Model Import Settings";
